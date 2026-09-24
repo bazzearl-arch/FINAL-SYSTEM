@@ -1244,9 +1244,22 @@ async def admin_export(format: str = Query("json"), _admin: dict = Depends(requi
 # -------------------- Register routes and CORS --------------------
 app.include_router(api)
 
+# Explicit origins: configured frontend + local dev. Extra origins (e.g. a custom
+# domain) can be added via the CORS_ORIGINS env var as a comma-separated list.
+_cors_origins = {FRONTEND_URL, "http://localhost:3000", "http://localhost:3001"}
+for _o in (os.environ.get("CORS_ORIGINS") or "").split(","):
+    _o = _o.strip()
+    if _o:
+        _cors_origins.add(_o)
+
+# Regex covers all Emergent-managed hosts (preview + deployed app URLs) so auth
+# works whether the app is opened from the preview domain or its public URL.
+_cors_origin_regex = r"https://([a-z0-9-]+\.)*(emergentagent\.com|emergent\.host|emergent\.sh)$"
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL],
+    allow_origins=list(_cors_origins),
+    allow_origin_regex=_cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

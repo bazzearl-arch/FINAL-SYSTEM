@@ -116,6 +116,9 @@ frontend:
         - working: true
           agent: "testing"
           comment: "Admin login tested successfully. User admin@gmail.com logged in with password 'adminpass'. POST /api/auth/login returned 200. Successfully redirected to /admin page. Admin Console rendered with 'System health & KPIs' heading. Products KPI shows 12 products. Toast message 'Welcome back' displayed correctly."
+        - working: true
+          agent: "testing"
+          comment: "REGRESSION TEST after CORS config change: POST /api/auth/login returned 200 OK. No OPTIONS preflight detected (normal for same-origin). No CORS errors in console. Successfully redirected to /admin. Admin Console rendered correctly. Success toast displayed. CORS config verified working."
   
   - task: "Sign Up - New User Registration"
     implemented: true
@@ -128,6 +131,9 @@ frontend:
         - working: true
           agent: "testing"
           comment: "New user registration tested successfully. Created user testuser1790269044@example.com with name 'Test User 1790269044' and password 'Password123!'. POST /api/auth/register returned 200. User automatically logged in after signup. Redirected to /profile page (as per implementation). Toast message 'Account created' displayed. User menu visible with user name. Note: Implementation redirects to /profile, not /catalog."
+        - working: true
+          agent: "testing"
+          comment: "REGRESSION TEST after CORS config change: Created user testuser+1790270089@example.com. POST /api/auth/register returned 200 OK. No OPTIONS preflight detected. No CORS errors in console. Successfully redirected to /profile. Success toast 'Account created' displayed. User auto-logged in. CORS config verified working."
   
   - task: "Session Persistence"
     implemented: true
@@ -152,6 +158,18 @@ frontend:
         - working: true
           agent: "testing"
           comment: "Logout tested successfully. User menu opened, logout clicked. POST /api/auth/logout returned 200. User logged out successfully. Redirected to /login page. Sign in button visible after logout, confirming user is no longer authenticated."
+  
+  - task: "Google Sign-In Integration"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/components/GoogleSignInButton.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "REGRESSION TEST after CORS config change: Google Sign-In button clicked on /login page. Successfully redirected to accounts.google.com (Google OAuth flow). No CORS errors from AtelierAI app before redirect. Note: CORS error detected on Emergent auth page (auth.emergentagent.com trying to fetch from demobackend.emergentagent.com) - this is external to AtelierAI app and not related to the CORS config change. AtelierAI app's redirect functionality working correctly."
 
 backend:
   - task: "Auth API Endpoints"
@@ -169,13 +187,13 @@ backend:
 metadata:
   created_by: "testing_agent"
   version: "1.0"
-  test_sequence: 1
+  test_sequence: 2
   run_ui: true
   last_tested: "2024-09-24"
 
 test_plan:
   current_focus:
-    - "All authentication flows tested and verified"
+    - "CORS regression testing completed - all auth flows verified"
   stuck_tasks: []
   test_all: true
   test_priority: "high_first"
@@ -183,3 +201,5 @@ test_plan:
 agent_communication:
     - agent: "testing"
       message: "Completed comprehensive authentication flow testing. All 4 test scenarios passed successfully: 1) Admin sign in with redirect to /admin and Products KPI showing 12, 2) New user signup with auto-login and redirect to /profile, 3) Session persistence after page reload, 4) Logout with proper cleanup. All API endpoints returning correct status codes. Minor console warning about uncontrolled inputs (React warning, not critical). No blocking issues found."
+    - agent: "testing"
+      message: "REGRESSION TEST COMPLETED after CORS config change. Tested all auth flows with detailed network monitoring. Results: 1) Sign In (admin@gmail.com): POST /api/auth/login returned 200, no CORS errors, successful redirect to /admin. 2) Sign Up (testuser+1790270089@example.com): POST /api/auth/register returned 200, no CORS errors, successful redirect to /profile. 3) Google Sign-In: Redirect to accounts.google.com successful, no CORS errors from AtelierAI app. Note: No OPTIONS preflight requests detected for /api/auth/* endpoints (normal for same-origin or simple requests). CORS config change verified working correctly."

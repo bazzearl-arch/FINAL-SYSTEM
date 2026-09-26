@@ -17,7 +17,7 @@ from io import BytesIO
 from PIL import Image
 
 # Configuration
-BASE_URL = "https://creds-config.preview.emergentagent.com/api"
+BASE_URL = "https://branding-engine-1.preview.emergentagent.com/api"
 ADMIN_EMAIL = "admin@gmail.com"
 ADMIN_PASSWORD = "adminpass"
 

@@ -283,7 +283,7 @@ agent_communication:
     - agent: "testing"
       message: "REGRESSION TEST COMPLETED after CORS config change. Tested all auth flows with detailed network monitoring. Results: 1) Sign In (admin@gmail.com): POST /api/auth/login returned 200, no CORS errors, successful redirect to /admin. 2) Sign Up (testuser+1790270089@example.com): POST /api/auth/register returned 200, no CORS errors, successful redirect to /profile. 3) Google Sign-In: Redirect to accounts.google.com successful, no CORS errors from AtelierAI app. Note: No OPTIONS preflight requests detected for /api/auth/* endpoints (normal for same-origin or simple requests). CORS config change verified working correctly."
     - agent: "testing"
-      message: "PRODUCTION URL VERIFICATION COMPLETED (2024-09-24). All auth flows passed on https://creds-config.preview.emergentagent.com. No CORS/Network errors."
+      message: "PRODUCTION URL VERIFICATION COMPLETED (2024-09-24). All auth flows passed on https://branding-engine-1.preview.emergentagent.com. No CORS/Network errors."
     - agent: "main"
       message: "AI Try-on PH rescue - Phase 1 backend built. Please test the 5 NEW backend tasks in current_focus (auth already verified, skip it). Engine is 'mock' (no FASHN key yet) so all products render locally. Storage uses local-disk fallback (EMERGENT_LLM_KEY absent) so /api/files/{id} should serve images. Admin creds: admin@gmail.com / adminpass. For multiview, use tiny base64 image data URLs for the 4 photos and 2-3 product_ids from GET /api/products."
     - agent: "testing"

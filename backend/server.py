@@ -1430,6 +1430,39 @@ async def admin_update_settings(input: SettingsInput, admin: dict = Depends(requ
     return await get_settings()
 
 
+@api.get("/admin/fashn/credits")
+async def admin_fashn_credits(_admin: dict = Depends(require_admin)):
+    """Return remaining FASHN credits by proxying https://api.fashn.ai/v1/credits.
+    Never exposes the API key to the client."""
+    import requests as _requests
+    key = os.environ.get("FASHN_API_KEY")
+    if not key:
+        return {"ok": False, "configured": False, "error": "FASHN_API_KEY not set"}
+    try:
+        r = _requests.get(
+            "https://api.fashn.ai/v1/credits",
+            headers={"Authorization": f"Bearer {key}"},
+            timeout=10,
+        )
+    except Exception as e:
+        return {"ok": False, "configured": True, "error": f"network: {e}"}
+    if r.status_code != 200:
+        return {"ok": False, "configured": True, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
+    try:
+        body = r.json()
+    except Exception:
+        return {"ok": False, "configured": True, "error": "non-JSON response"}
+    credits = body.get("credits") or {}
+    return {
+        "ok": True,
+        "configured": True,
+        "total": int(credits.get("total") or 0),
+        "subscription": int(credits.get("subscription") or 0),
+        "on_demand": int(credits.get("on_demand") or 0),
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @api.post("/admin/import/csv")
 async def admin_import_csv(input: ImportCSVInput, admin: dict = Depends(require_admin)):
     """Bulk import products from CSV text. Columns (case-insensitive):

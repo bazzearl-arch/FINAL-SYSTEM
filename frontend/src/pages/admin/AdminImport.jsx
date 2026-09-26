@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, XCircle, RefreshCw, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
 const EXAMPLE_JSON = JSON.stringify(
@@ -39,14 +39,29 @@ export default function AdminImport() {
   const [jobs, setJobs] = useState([]);
   const [lastResult, setLastResult] = useState(null);
   const [settings, setSettings] = useState(null);
+  const [credits, setCredits] = useState(null);
+  const [creditsBusy, setCreditsBusy] = useState(false);
 
   const loadJobs = async () => {
-    try { const { data } = await api.get("/admin/import/jobs"); setJobs(data); } catch {}
+    try { const { data } = await api.get("/admin/import/jobs"); setJobs(data); } catch (_e) { /* silent */ }
   };
   const loadSettings = async () => {
-    try { const { data } = await api.get("/admin/settings"); setSettings(data); } catch {}
+    try { const { data } = await api.get("/admin/settings"); setSettings(data); } catch (_e) { /* silent */ }
   };
-  useEffect(() => { loadJobs(); loadSettings(); }, []);
+  const loadCredits = async ({ silent } = {}) => {
+    setCreditsBusy(true);
+    try {
+      const { data } = await api.get("/admin/fashn/credits");
+      setCredits(data);
+      if (!silent && data?.ok) toast.success(`FASHN credits: ${data.total}`);
+      if (!silent && !data?.ok && data?.configured) toast.error(data.error || "Could not fetch credits");
+    } catch (e) {
+      if (!silent) toast.error("Could not fetch FASHN credits");
+    } finally {
+      setCreditsBusy(false);
+    }
+  };
+  useEffect(() => { loadJobs(); loadSettings(); loadCredits({ silent: true }); }, []);
 
   const saveSettings = async (patch) => {
     try {
@@ -160,6 +175,117 @@ export default function AdminImport() {
           </p>
         )}
       </div>
+
+      {settings?.fashn_key_configured && (
+        (() => {
+          const total = credits?.ok ? credits.total : null;
+          const lowThreshold = 20;
+          const low = total !== null && total < lowThreshold;
+          const empty = total !== null && total <= 0;
+          const perViewCost = { fast: 1, balanced: 2, quality: 4 }[settings?.mode || "balanced"] || 2;
+          const rendersLeft = total !== null ? Math.floor(total / (perViewCost * 4)) : null; // 1-item, 4 views
+          const barColor = empty
+            ? "bg-red-500"
+            : low
+              ? "bg-amber-500"
+              : "bg-emerald-500";
+          const pct = total === null ? 0 : Math.min(100, Math.round((total / 100) * 100));
+          return (
+            <div
+              className={`mb-6 rounded-2xl border p-6 ${
+                empty
+                  ? "border-red-500/40 bg-red-500/5"
+                  : low
+                    ? "border-amber-500/40 bg-amber-500/5"
+                    : "border-border bg-card"
+              }`}
+              data-testid="fashn-credit-meter"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-xl bg-background/60 border border-border p-2.5">
+                    <Wallet className="h-5 w-5 text-emerald-600" />
+                  </div>
+                  <div>
+                    <p className="overline-label text-muted-foreground">FASHN Credits</p>
+                    <h3 className="font-serif text-xl mt-1">
+                      {credits?.ok ? (
+                        <>
+                          <span data-testid="fashn-credit-total">{total}</span>
+                          <span className="text-muted-foreground text-base ml-1">credits</span>
+                        </>
+                      ) : credits?.configured === false ? (
+                        "Not configured"
+                      ) : credits === null ? (
+                        <span className="text-muted-foreground">Loading…</span>
+                      ) : (
+                        <span className="text-red-600">Unavailable</span>
+                      )}
+                    </h3>
+                    {credits?.ok && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        On-demand: <span data-testid="fashn-credit-ondemand">{credits.on_demand}</span>
+                        {" · "}Subscription: <span data-testid="fashn-credit-sub">{credits.subscription}</span>
+                        {rendersLeft !== null && (
+                          <> {" · "}~<span data-testid="fashn-renders-left">{rendersLeft}</span> single-item try-ons left at {settings?.mode || "balanced"}/{settings?.resolution || "1k"}</>
+                        )}
+                      </p>
+                    )}
+                    {credits && !credits.ok && credits.configured && (
+                      <p className="text-xs text-red-600 mt-1" data-testid="fashn-credit-error">
+                        {credits.error}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => loadCredits()}
+                    disabled={creditsBusy}
+                    data-testid="fashn-credit-refresh"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${creditsBusy ? "animate-spin" : ""}`} />
+                    Refresh
+                  </Button>
+                  <a
+                    href="https://app.fashn.ai/billing"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-muted-foreground underline hover:text-foreground"
+                    data-testid="fashn-topup-link"
+                  >
+                    Top up ↗
+                  </a>
+                </div>
+              </div>
+
+              {credits?.ok && (
+                <div className="mt-4">
+                  <div className="h-2 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className={`h-full ${barColor} transition-all`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  {empty && (
+                    <p className="text-xs text-red-600 mt-2" data-testid="fashn-credit-empty">
+                      Out of credits. Top up before running more try-ons — new sessions will fail.
+                    </p>
+                  )}
+                  {low && !empty && (
+                    <p className="text-xs text-amber-600 mt-2" data-testid="fashn-credit-low">
+                      Low balance ({total} credits). About {rendersLeft} single-item try-ons left — consider topping up.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()
+      )}
 
       <Alert className="mb-6 border-amber-500/50 bg-amber-500/5">
         <AlertTriangle className="h-4 w-4 text-amber-600" />

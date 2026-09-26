@@ -288,19 +288,31 @@ def render_one_fashn(
     else:
         return RenderOutcome(ok=False, error="No garment image", engine="fashn")
 
-    inputs = {
-        "product_image": product_image,
-        "model_image": model_image,
-        "resolution": resolution,
-        "generation_mode": mode,
-        "num_images": 1,
-    }
-    # category / garment_photo_type are accepted by FASHN try-on models and
-    # improve extraction; include when meaningfully set.
-    if category and category != "auto":
-        inputs["category"] = category
-    if garment_photo_type and garment_photo_type != "auto":
-        inputs["garment_photo_type"] = garment_photo_type
+    # Build inputs per FASHN model schema.
+    # - tryon-max: {product_image, model_image, resolution, generation_mode, num_images}
+    #   (does NOT accept category / garment_photo_type)
+    # - tryon-v1.6: {model_image, garment_image, category, mode, garment_photo_type, num_samples}
+    if FASHN_MODEL == "tryon-v1.6":
+        inputs = {
+            "model_image": model_image,
+            "garment_image": product_image,
+            "mode": mode,
+            "num_samples": 1,
+            "output_format": "jpeg",
+        }
+        if category and category != "auto":
+            inputs["category"] = category
+        if garment_photo_type and garment_photo_type != "auto":
+            inputs["garment_photo_type"] = garment_photo_type
+    else:
+        # tryon-max (default) — strict schema, no category/photo_type allowed.
+        inputs = {
+            "product_image": product_image,
+            "model_image": model_image,
+            "resolution": resolution,
+            "generation_mode": mode,
+            "num_images": 1,
+        }
 
     headers = {"Authorization": f"Bearer {FASHN_API_KEY}", "Content-Type": "application/json"}
     start = time.time()

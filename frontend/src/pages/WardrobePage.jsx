@@ -7,6 +7,29 @@ import { toast } from "sonner";
 import { Link } from "react-router-dom";
 import PrivateImage from "@/components/PrivateImage";
 
+/**
+ * Return a thumbnail file_id for a try-on session, handling both:
+ * - legacy single-view sessions (result_file_id / photo_file_id)
+ * - new multi-view sessions (views.{front,left,right,rear}.file_id)
+ */
+function sessionThumbFileId(s) {
+  if (!s) return null;
+  if (s.result_file_id) return s.result_file_id;
+  if (s.photo_file_id) return s.photo_file_id;
+  const v = s.views;
+  if (v) {
+    if (v.front?.file_id) return v.front.file_id;
+    for (const k of ["left", "right", "rear"]) {
+      if (v[k]?.file_id) return v[k].file_id;
+    }
+  }
+  if (Array.isArray(s.photo_file_ids) && s.photo_file_ids.length) return s.photo_file_ids[0];
+  if (s.photo_file_ids && typeof s.photo_file_ids === "object") {
+    return s.photo_file_ids.front || Object.values(s.photo_file_ids)[0] || null;
+  }
+  return null;
+}
+
 export default function WardrobePage() {
   const [items, setItems] = useState([]);
   const [outfits, setOutfits] = useState([]);
@@ -105,7 +128,7 @@ export default function WardrobePage() {
       } else {
         downloadAvatar(fileId);
       }
-    } catch {}
+    } catch (_e) { /* silent */ }
   };
 
   return (
@@ -132,7 +155,7 @@ export default function WardrobePage() {
               {favorites.map((s) => (
                 <div key={s.id} className="bg-card border border-border rounded-2xl overflow-hidden relative group" data-testid={`favorite-${s.id}`}>
                   <div className="aspect-[3/4] bg-muted">
-                    <PrivateImage fileId={s.result_file_id || s.photo_file_id} className="w-full h-full object-cover" />
+                    <PrivateImage fileId={sessionThumbFileId(s)} className="w-full h-full object-cover" />
                   </div>
                   <div className="p-4">
                     <p className="text-xs text-muted-foreground font-mono truncate">{s.adapter}</p>
@@ -225,7 +248,7 @@ export default function WardrobePage() {
               {sessions.map((s) => (
                 <div key={s.id} className="bg-card border border-border rounded-xl overflow-hidden relative group" data-testid={`session-${s.id}`}>
                   <div className="aspect-[3/4] bg-muted">
-                    <PrivateImage fileId={s.result_file_id || s.photo_file_id} className="w-full h-full object-cover" />
+                    <PrivateImage fileId={sessionThumbFileId(s)} className="w-full h-full object-cover" />
                   </div>
                   <button
                     data-testid={`session-fav-${s.id}`}

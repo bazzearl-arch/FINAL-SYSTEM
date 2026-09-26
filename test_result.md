@@ -271,9 +271,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "TryOn Full Flow (gender → 4 photos → outfit → results carousel → items with deep links)"
-    - "AdminProducts URL editor (canonical categories + gender + product_url + url_status badge)"
-    - "AdminImport CSV + engine settings panel"
+    - "Wardrobe multi-view session image display"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -351,6 +349,24 @@ frontend_new:
         - working: true
           agent: "testing"
           comment: "BRANDING VERIFIED. 1) Page title is 'AI Try-on PH' (correct), 2) Navbar shows 'AI Try-on PH' with ' PH' in gold styling (brand-gold class), 3) No 'AtelierAI' found anywhere on the page. All branding requirements met."
+  
+  - task: "Wardrobe multi-view session image display"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/WardrobePage.jsx"
+    priority: "high"
+    needs_retesting: false
+    stuck_count: 0
+    status_history:
+        - working: false
+          agent: "testing"
+          comment: "BUG DIAGNOSED (2026-09-26): Try-on rendered outputs showing grey placeholders instead of AI-rendered images. ROOT CAUSE: WardrobePage.jsx was using `fileId={s.result_file_id || s.photo_file_id}` but multi-view sessions don't have these fields. Multi-view sessions use `views.front.file_id` instead. The PrivateImage component received fileId=undefined, causing stuck grey placeholders."
+        - working: true
+          agent: "main"
+          comment: "BUG FIX APPLIED (2026-09-26): Added helper function `sessionThumbFileId(s)` (lines 10-31) that handles both legacy single-view sessions (result_file_id/photo_file_id) and new multi-view sessions (views.front.file_id). Updated Favorites tab (line 158) and Try-On History tab (line 251) to use this helper."
+        - working: true
+          agent: "testing"
+          comment: "BUG FIX VERIFIED (2026-09-26). ALL TESTS PASSED. Try-On History: 12 session cards with REAL IMAGES (no grey placeholders). Images have blob: src and valid dimensions (848×1264). Network: 8 successful /api/files/ requests (200, image/png, 220KB-1.2MB). Favorites tab: Image loads correctly after favoriting. Screenshot shows 4 cards with real AI-rendered images. Helper function correctly falls back to views.front.file_id for multi-view sessions."
 
 
     - agent: "testing"
@@ -377,3 +393,9 @@ agent_communication:
       message: "FASHN ENGINE MULTI-VIEW VERIFICATION COMPLETED (2026-09-26). ALL ASSERTIONS PASSED. Tested multi-view try-on with real FASHN engine at https://branding-engine-1.preview.emergentagent.com. Test details: 1) Admin login successful (admin@gmail.com/adminpass). 2) GET /api/admin/settings confirmed engine='fashn' and fashn_key_configured=true. 3) Selected 1 women's tops product. 4) POST /api/tryon/multiview with 4 photos (Unsplash portrait reused for all views) and 1 product_id returned 200 with status='processing'. 5) Session completed in 84.5 seconds (30 polls, ~21s per view) with status='COMPLETED'. 6) All 4 views have file_ids and verified as real FASHN renders: front=1219.6KB, left=1317.2KB, right=824.3KB, rear=1215.5KB (all >50KB, confirming real FASHN vs mock <20KB). 7) Items_used array contains 1 item with correct product_id, product_url, and url_status. 8) FASHN credits: before=90, after=82, used=8 credits (1 tops × 4 views × 2 credits/view = 8 credits as expected). Multi-view try-on with real FASHN engine VERIFIED and WORKING."
     - agent: "testing"
       message: "FASHN CREDIT METER VERIFICATION COMPLETED (2026-09-26). ALL REQUIREMENTS MET. Verified new FASHN Credit Meter on /admin/import page. All 7 numbered steps from review request passed: 1) Logged in as admin, navigated to /admin/import. 2) Credit meter renders in correct position (BELOW Rendering settings, ABOVE Scraper honesty notice). 3) All credit numbers display: total=50, on-demand=50, subscription=0, renders-left=12. 4) Refresh button works correctly (icon spins, toast appears with 'FASHN credits: 50'). 5) Top-up link verified (href='https://app.fashn.ai/billing', target='_blank'). 6) Minor console errors detected (2x 401 from initial load, 1x React hydration warning) - do not affect functionality. 7) Network check passed: GET /api/admin/fashn/credits returns 200 with {ok:true, configured:true, total:50}. Feature working correctly.""
+    - agent: "testing"
+      message: "BUG DIAGNOSED (2026-09-26): Try-on rendered outputs showing grey placeholders instead of AI-rendered images. ROOT CAUSE IDENTIFIED: WardrobePage.jsx line 228 uses `fileId={s.result_file_id || s.photo_file_id}` but multi-view sessions (kind='multiview') do NOT have these fields. Multi-view sessions have `views.front.file_id` instead. The PrivateImage component receives fileId=undefined, so it never attempts to fetch the image and remains stuck in loading state (grey placeholder). Backend is working correctly - curl to /api/files/{file_id} returns 200 image/png 500KB. This is a frontend data mapping issue, not an auth/CORS/blob issue. FIX REQUIRED: Update WardrobePage.jsx to handle multi-view sessions by using `views.front.file_id` (or first available view) as fallback when result_file_id/photo_file_id are missing."
+    - agent: "main"
+      message: "BUG FIX APPLIED (2026-09-26): Added helper function `sessionThumbFileId(s)` to WardrobePage.jsx (lines 10-31) that handles both legacy single-view sessions (result_file_id/photo_file_id) and new multi-view sessions (views.front.file_id, views.left.file_id, etc.). Updated both Favorites tab (line 158) and Try-On History tab (line 251) to use this helper. This ensures multi-view sessions display their front view image instead of grey placeholders. Please verify: 1) Try-On History tab shows real images (not grey placeholders), 2) Images have blob: src and valid dimensions, 3) Network requests to /api/files/ return 200 with image/png >100KB, 4) Favorites tab also works correctly."
+    - agent: "testing"
+      message: "BUG FIX VERIFICATION COMPLETED (2026-09-26). ALL TESTS PASSED ✅. Tested at https://branding-engine-1.preview.emergentagent.com with admin@gmail.com/adminpass. RESULTS: 1) Try-On History tab: Found 12 session cards, all displaying REAL IMAGES (no grey placeholders). 2) Image verification: Tested 4 sessions - all have <img> elements with blob: src (e.g., 'blob:https://branding-engine-1.preview.emergentagent.com/...') and valid naturalWidth×naturalHeight (848×1264). 3) Network verification: 8 successful /api/files/ requests with status 200, content-type image/png, and Content-Length >100KB (ranging from 220KB to 1.2MB - confirmed real FASHN renders). 4) Favorites tab: After favoriting a session, image loads correctly with blob: src and dimensions 848×1264. 5) /try-on page: Defaults to Step 1 (gender selection) - no stale state. 6) Screenshot captured showing 4 session cards with real AI-rendered images (men's clothing and women's dress). MINOR: 2 console 401 errors from initial load (not critical). ROOT CAUSE FIX VERIFIED: Helper function `sessionThumbFileId(s)` correctly falls back to views.front.file_id for multi-view sessions, resolving the grey placeholder issue. Bug fix WORKING CORRECTLY."

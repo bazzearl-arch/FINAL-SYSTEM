@@ -261,21 +261,85 @@ backend:
 
 metadata:
   created_by: "main_agent"
-  version: "2.0"
-  test_sequence: 4
-  run_ui: false
+  version: "2.1"
+  test_sequence: 5
+  run_ui: true
   last_tested: "2025-01-26"
 
 test_plan:
   current_focus:
-    - "Multi-view outfit try-on (mock engine, chaining)"
-    - "Gender-specific product & category filtering"
-    - "Admin CSV product import"
-    - "Admin settings (engine/mode/resolution)"
-    - "Admin single-render test endpoint"
+    - "TryOn Full Flow (gender → 4 photos → outfit → results carousel → items with deep links)"
+    - "AdminProducts URL editor (canonical categories + gender + product_url + url_status badge)"
+    - "AdminImport CSV + engine settings panel"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+frontend_new:
+  - task: "TryOn Full Flow (gender → 4 photos → outfit → results)"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/TryOnPage.jsx"
+    priority: "high"
+    needs_retesting: false
+    stuck_count: 0
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Rewrote TryOnPage.jsx. Steps: 1) gender pick, 2) 2x2 photo grid with camera + upload + retake, 3) gender-filtered category tabs + product multi-select, 4) results carousel (front/left/right/rear) with PrivateImage thumbnails + items-used list with exact product_url deep links. Please test end-to-end with admin@gmail.com/adminpass: pick 'Women', use Upload (any small jpg) for all 4 photos, pick 2 items in Tops, click Try On, verify carousel appears with 4 view thumbnails, verify View Product links exist and href is not the platform homepage."
+  - task: "AdminProducts exact URL editor"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/admin/AdminProducts.jsx"
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Rewrote AdminProducts. Adds gender / canonical category / platform / exact product_url fields. Shows url_status per row (green ‘exact’ link vs amber ‘missing’). ‘Missing URL (n)’ filter + banner. Please test: 1) filter=missing shows only products without product_url, 2) editing a product and pasting a valid https://... URL flips row from missing→exact, 3) invalid URL (‘lazada.com’ no scheme) is rejected."
+        - working: true
+          agent: "testing"
+          comment: "COMPREHENSIVE E2E TEST PASSED. Tested full try-on flow for WOMEN: 1) Gender selection working, 2) All 4 photos uploaded (front/left/right/rear), 3) Category tabs include 'One Pieces' (displayed with space, canonical: one-pieces) - correctly shown for women, 4) Selected product from one-pieces category, 5) Try-on completed in ~1s with status COMPLETED, 6) Carousel shows '1/4 · Front' and navigation works (clicking next changes to '2/4 · Left side'), 7) All 4 view thumbnails present, 8) Items-used panel shows 1 product with View Product link, 9) CRITICAL: Product URL verified as full URL with path: 'https://www.lazada.com.ph/products/silk-slip-dress-i3345566778.html' (NOT bare homepage). Also tested MEN gender filtering: categories correctly exclude 'one-pieces' (shows: tops, bottoms, outerwear, shoes, hats, bags, accessories). All functionality working as expected."
+  - task: "AdminProducts exact URL editor"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/admin/AdminProducts.jsx"
+    priority: "high"
+    needs_retesting: false
+    stuck_count: 0
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Rewrote AdminProducts. Adds gender / canonical category / platform / exact product_url fields. Shows url_status per row (green 'exact' link vs amber 'missing'). 'Missing URL (n)' filter + banner. Please test: 1) filter=missing shows only products without product_url, 2) editing a product and pasting a valid https://... URL flips row from missing→exact, 3) invalid URL ('lazada.com' no scheme) is rejected."
+        - working: true
+          agent: "testing"
+          comment: "ALL TESTS PASSED. 1) Filter-missing chip shows 'Missing URL (13)' with correct count, 2) Clicking filter-missing shows only products with amber 'missing' badges (13 visible, 0 'ok' badges), 3) Edit dialog contains all required fields: category dropdown with all 9 canonical categories (tops, bottoms, one-pieces, outerwear, shoes, bags, jewelry, hats, accessories), gender field, platform field, product URL field, 4) URL validation working: entering 'lazada.com' (no scheme) and clicking Save shows toast 'Product URL must start with http(s)://' and dialog stays open, 5) Valid URL 'https://www.lazada.com.ph/products/updated-i123456789.html' saves successfully and dialog closes. All functionality working correctly."
+  - task: "AdminImport CSV + engine settings"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/admin/AdminImport.jsx"
+    priority: "high"
+    needs_retesting: false
+    stuck_count: 0
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "ALL TESTS PASSED. 1) Try-On settings section present with engine dropdown, 2) Engine dropdown shows 'mock' selected (displays as 'Mock (free preview)'), 3) FASHN badge shows 'not set', 4) CSV tab is default/active, 5) Pre-filled CSV example present (442 characters), 6) CSV import successful: toast shows 'Imported 2 products', 7) Result panel shows 'SUCCESS' with saved=2, errors=0. All functionality working correctly."
+  - task: "Branding verification"
+    implemented: true
+    working: true
+    file: "/app/frontend/public/index.html, /app/frontend/src/components/Navbar.jsx"
+    priority: "high"
+    needs_retesting: false
+    stuck_count: 0
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "BRANDING VERIFIED. 1) Page title is 'AI Try-on PH' (correct), 2) Navbar shows 'AI Try-on PH' with ' PH' in gold styling (brand-gold class), 3) No 'AtelierAI' found anywhere on the page. All branding requirements met."
+
+
+    - agent: "testing"
+      message: "COMPREHENSIVE FRONTEND E2E TESTING COMPLETED (2025-01-26). Tested all 5 scenarios requested - ALL PASSED. 1) BRANDING: Page title 'AI Try-on PH', navbar shows 'AI Try-on PH' with ' PH' in gold, no 'AtelierAI' found. 2) TRY-ON WOMEN: Full flow working - gender selection, 4 photos uploaded, 'One Pieces' category shown for women, product selected, try-on completed in ~1s, carousel with 4 views working, View Product URL verified as full URL with path (https://www.lazada.com.ph/products/silk-slip-dress-i3345566778.html). 3) GENDER MEN: Categories correctly exclude 'one-pieces' (shows: tops, bottoms, outerwear, shoes, hats, bags, accessories). 4) ADMIN PRODUCTS: Filter-missing shows 13 products, all 9 canonical categories present in edit dialog, URL validation working ('lazada.com' rejected, 'https://...' accepted). 5) ADMIN IMPORT: Engine settings show 'mock' selected, FASHN 'not set', CSV import successful (2 products). All features working correctly. Ready for production."
 
 agent_communication:
     - agent: "testing"

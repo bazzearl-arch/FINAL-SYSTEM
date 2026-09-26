@@ -49,8 +49,8 @@ export default function LandingPage() {
             <div className="col-span-4 row-span-4 rounded-2xl overflow-hidden bg-muted relative">
               <img src={HERO} alt="editorial fashion" className="w-full h-full object-cover" />
               <div className="absolute bottom-4 left-4 right-4 bg-background/85 backdrop-blur-xl rounded-xl p-4 border border-border/50">
-                <p className="overline-label text-muted-foreground">Development Placeholder</p>
-                <p className="text-sm mt-1">AI adapter simulates try-on. Ready for VITON-HD integration.</p>
+                <p className="overline-label text-muted-foreground">Four angles, one outfit</p>
+                <p className="text-sm mt-1">Front · Left · Right · Rear — rendered by a 2D AI try-on engine.</p>
               </div>
             </div>
             <div className="col-span-2 row-span-2 rounded-2xl overflow-hidden bg-muted">
@@ -74,17 +74,17 @@ export default function LandingPage() {
             <h2 className="font-serif text-3xl sm:text-4xl mt-2">Everything you need to explore fashion, intelligently.</h2>
           </div>
           <p className="max-w-sm text-muted-foreground text-sm">
-            A modular architecture for research, ready to slot in VITON-HD or
-            any compatible model server.
+            Built for Filipino shoppers — gender-aware categories, four-view
+            renders, and deep links straight to the exact product listing.
           </p>
         </div>
 
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            { icon: Camera, title: "AI Body Estimation", desc: "Upload a full-body photo or use your camera. Preprocessed via the mock adapter pipeline." },
-            { icon: Layers, title: "Outfit Canvas", desc: "Compose looks slot by slot — top, bottom, dress, jacket, jewelry, accessories, shoes." },
-            { icon: Store, title: "PH Shopping Links", desc: "Redirect to Lazada, Shopee, Bench, Kultura, and Zalora PH. Never a checkout inside." },
-            { icon: Heart, title: "Private Wardrobe", desc: "Save items, outfits, and try-on renders. Owner-only visibility, enforced server-side." },
+            { icon: Camera, title: "Four whole-body photos", desc: "Front, left, right, rear — captured by camera or uploaded, previewed and retakeable." },
+            { icon: Layers, title: "Gender-aware outfit builder", desc: "Pick tops, bottoms, one-pieces, outerwear, shoes, bags, jewelry, hats — filtered to your gender." },
+            { icon: Store, title: "Exact PH shopping links", desc: "Every View Product button opens the exact Lazada, Shopee, Zalora, or TikTok Shop listing." },
+            { icon: Heart, title: "Private wardrobe", desc: "Save renders and outfits. Owner-only visibility, enforced server-side." },
           ].map((f, idx) => (
             <div
               key={f.title}

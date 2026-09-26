@@ -27,17 +27,45 @@ const EXAMPLE_JSON = JSON.stringify(
   2
 );
 
+const EXAMPLE_CSV = `product_name,gender,category,price,currency,image_url,product_url,platform,garment_photo_type
+Classic White Tee,men,tops,499,PHP,https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=600,https://shopee.ph/classic-white-tee-i.111.222,Shopee,model
+Pleated Midi Skirt,women,bottoms,899,PHP,https://images.unsplash.com/photo-1583496661160-fb5886a0aaaa?w=600,https://www.lazada.com.ph/products/pleated-midi-skirt-i123.html,Lazada,flat-lay`;
+
 export default function AdminImport() {
   const [json, setJson] = useState(EXAMPLE_JSON);
+  const [csv, setCsv] = useState(EXAMPLE_CSV);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [jobs, setJobs] = useState([]);
   const [lastResult, setLastResult] = useState(null);
+  const [settings, setSettings] = useState(null);
 
   const loadJobs = async () => {
     try { const { data } = await api.get("/admin/import/jobs"); setJobs(data); } catch {}
   };
-  useEffect(() => { loadJobs(); }, []);
+  const loadSettings = async () => {
+    try { const { data } = await api.get("/admin/settings"); setSettings(data); } catch {}
+  };
+  useEffect(() => { loadJobs(); loadSettings(); }, []);
+
+  const saveSettings = async (patch) => {
+    try {
+      const { data } = await api.put("/admin/settings", patch);
+      setSettings(data);
+      toast.success("Settings saved");
+    } catch { toast.error("Could not save settings"); }
+  };
+
+  const submitCsv = async () => {
+    setBusy(true); setLastResult(null);
+    try {
+      const { data } = await api.post("/admin/import/csv", { payload: csv });
+      setLastResult({ ...data, message: `CSV: ${data.saved} saved, ${data.errors} errors` });
+      if (data.saved > 0) toast.success(`Imported ${data.saved} products`);
+      else toast.error("No products imported — check your columns");
+    } catch (e) { toast.error("CSV import failed"); }
+    setBusy(false); loadJobs();
+  };
 
   const submitJson = async () => {
     setBusy(true); setLastResult(null);
@@ -69,21 +97,106 @@ export default function AdminImport() {
       <p className="overline-label text-muted-foreground">Product Sources</p>
       <h1 className="font-serif text-3xl mt-2 mb-6">Import catalog</h1>
 
+      {/* Try-On engine settings */}
+      <div className="mb-6 bg-card border border-border rounded-2xl p-6" data-testid="tryon-settings">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <p className="overline-label text-muted-foreground">Try-On Engine</p>
+            <h3 className="font-serif text-xl mt-1">Rendering settings</h3>
+          </div>
+          {settings && (
+            <span className={`text-xs rounded-full px-3 py-1 border ${settings.fashn_key_configured ? "border-emerald-500/40 text-emerald-600" : "border-amber-500/40 text-amber-600"}`}>
+              FASHN key: {settings.fashn_key_configured ? "configured" : "not set"}
+            </span>
+          )}
+        </div>
+        {settings && (
+          <div className="mt-4 grid sm:grid-cols-3 gap-4 text-sm">
+            <div>
+              <Label className="text-xs">Engine</Label>
+              <select
+                data-testid="setting-engine"
+                value={settings.engine}
+                onChange={(e) => saveSettings({ engine: e.target.value })}
+                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2"
+              >
+                <option value="mock">Mock (free preview)</option>
+                <option value="fashn" disabled={!settings.fashn_key_configured}>
+                  FASHN (real AI{settings.fashn_key_configured ? "" : " — add key"})
+                </option>
+              </select>
+            </div>
+            <div>
+              <Label className="text-xs">Quality mode</Label>
+              <select
+                data-testid="setting-mode"
+                value={settings.mode}
+                onChange={(e) => saveSettings({ mode: e.target.value })}
+                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2"
+              >
+                <option value="fast">Fast (cheapest)</option>
+                <option value="balanced">Balanced</option>
+                <option value="quality">Quality</option>
+              </select>
+            </div>
+            <div>
+              <Label className="text-xs">Resolution</Label>
+              <select
+                data-testid="setting-resolution"
+                value={settings.resolution}
+                onChange={(e) => saveSettings({ resolution: e.target.value })}
+                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2"
+              >
+                <option value="1k">1K</option>
+                <option value="2k">2K</option>
+                <option value="4k">4K</option>
+              </select>
+            </div>
+          </div>
+        )}
+        {settings && !settings.fashn_key_configured && (
+          <p className="text-xs text-muted-foreground mt-3">
+            To enable real AI renders, add your FASHN API key as <code className="font-mono">FASHN_API_KEY</code> on the backend, then switch the engine to FASHN.
+          </p>
+        )}
+      </div>
+
       <Alert className="mb-6 border-amber-500/50 bg-amber-500/5">
         <AlertTriangle className="h-4 w-4 text-amber-600" />
         <AlertTitle>Scraper honesty notice</AlertTitle>
         <AlertDescription className="text-sm text-muted-foreground">
           Lazada and Shopee load product data via JavaScript and actively block basic scraping.
           Expect frequent failures — jobs are logged with their true status (no fabricated success).
-          For production data, use their official partner/affiliate feeds and paste them as JSON below.
+          For production data, use their official partner/affiliate feeds and paste them as CSV or JSON below.
         </AlertDescription>
       </Alert>
 
-      <Tabs defaultValue="url">
+      <Tabs defaultValue="csv">
         <TabsList className="rounded-full bg-muted p-1 h-auto mb-6">
+          <TabsTrigger data-testid="import-tab-csv" value="csv" className="rounded-full px-5">CSV Upload</TabsTrigger>
           <TabsTrigger data-testid="import-tab-url" value="url" className="rounded-full px-5">Web URL Scrape</TabsTrigger>
           <TabsTrigger data-testid="import-tab-json" value="json" className="rounded-full px-5">JSON Feed</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="csv">
+          <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
+            <Label>Paste CSV — columns: product_name, gender, category, price, currency, image_url, product_url, platform, garment_photo_type</Label>
+            <Textarea
+              data-testid="import-csv-input"
+              value={csv}
+              onChange={(e) => setCsv(e.target.value)}
+              rows={10}
+              className="font-mono text-xs"
+            />
+            <p className="text-xs text-muted-foreground">
+              gender: men/women/unisex · category: tops, bottoms, one-pieces, outerwear, shoes, bags, jewelry, hats, accessories ·
+              product_url must be the EXACT item page (rows without it are flagged “missing”).
+            </p>
+            <Button data-testid="import-csv-submit" onClick={submitCsv} disabled={busy} className="rounded-full">
+              {busy ? "Importing…" : "Import CSV"}
+            </Button>
+          </div>
+        </TabsContent>
 
         <TabsContent value="url">
           <div className="bg-card border border-border rounded-2xl p-6 space-y-4">

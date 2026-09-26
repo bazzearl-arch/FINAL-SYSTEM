@@ -27,7 +27,11 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, ConfigDict, EmailStr, BeforeValidator
 
 import storage_client
-from tryon_adapters import MockDevelopmentAdapter, HFIDMVTONAdapter, get_adapter, _decode_data_url
+import tryon_adapters
+from tryon_adapters import (
+    MockDevelopmentAdapter, HFIDMVTONAdapter, get_adapter, _decode_data_url,
+    render_one_mock, render_one_fashn, current_engine,
+)
 from product_connectors import (
     import_json_feed, import_csv_feed, scrape_lazada, scrape_shopee, scrape_generic_url,
     NormalizedProduct,
@@ -45,7 +49,7 @@ FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
 
-app = FastAPI(title="Atelier AI Virtual Try-On API")
+app = FastAPI(title="AI Try-on PH API")
 api = APIRouter(prefix="/api")
 
 logging.basicConfig(level=logging.INFO)
@@ -140,6 +144,70 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
+# -------------------- Category / Gender config --------------------
+# Canonical categories used across the app + try-on engine.
+CANONICAL_CATEGORIES = [
+    "tops", "bottoms", "one-pieces", "outerwear", "shoes", "bags", "jewelry", "hats", "accessories",
+]
+
+# Gender-specific category menus (data-level filtering, not just visual).
+GENDER_CATEGORIES = {
+    "men": ["tops", "bottoms", "outerwear", "shoes", "hats", "bags", "accessories"],
+    "women": ["tops", "bottoms", "one-pieces", "outerwear", "shoes", "hats", "bags", "jewelry", "accessories"],
+}
+
+# Map legacy category values -> canonical.
+_CATEGORY_ALIASES = {
+    "top": "tops", "tops": "tops",
+    "bottom": "bottoms", "bottoms": "bottoms", "pants": "bottoms", "trousers": "bottoms",
+    "dress": "one-pieces", "dresses": "one-pieces", "one-piece": "one-pieces", "one-pieces": "one-pieces",
+    "jacket": "outerwear", "coat": "outerwear", "outerwear": "outerwear",
+    "shoe": "shoes", "shoes": "shoes", "footwear": "shoes",
+    "bag": "bags", "bags": "bags",
+    "jewelry": "jewelry", "jewellery": "jewelry",
+    "hat": "hats", "hats": "hats", "cap": "hats",
+    "accessory": "accessories", "accessories": "accessories",
+}
+
+# Categories FASHN Try-On Max can actually render onto the body.
+RENDERABLE_CATEGORIES = {"tops", "bottoms", "one-pieces", "outerwear", "shoes", "hats", "jewelry", "bags"}
+
+# Order in which garments are chained onto the photo (base layers first).
+_CHAIN_ORDER = ["one-pieces", "tops", "bottoms", "outerwear", "shoes", "bags", "hats", "jewelry"]
+
+# FASHN category param per canonical category (tops/bottoms/one-pieces or auto).
+_FASHN_CATEGORY = {
+    "tops": "tops", "outerwear": "tops",
+    "bottoms": "bottoms",
+    "one-pieces": "one-pieces",
+}
+
+
+def canonical_category(value: Optional[str]) -> str:
+    return _CATEGORY_ALIASES.get((value or "").strip().lower(), (value or "").strip().lower() or "accessories")
+
+
+def normalize_gender(value: Optional[str]) -> str:
+    v = (value or "").strip().lower()
+    if v in ("man", "men", "male", "m"):
+        return "men"
+    if v in ("woman", "women", "female", "f", "w"):
+        return "women"
+    return "unisex"
+
+
+async def get_settings() -> dict:
+    doc = await db.app_settings.find_one({"_id": "tryon"})
+    engine = tryon_adapters.current_engine()
+    return {
+        "engine": (doc or {}).get("engine", engine),
+        "mode": (doc or {}).get("mode", "balanced"),
+        "resolution": (doc or {}).get("resolution", "1k"),
+        "fashn_key_configured": bool(os.environ.get("FASHN_API_KEY")),
+    }
+
+
+
 # -------------------- Models --------------------
 class RegisterInput(BaseModel):
     email: EmailStr
@@ -168,15 +236,18 @@ class ProductInput(BaseModel):
     name: str
     description: Optional[str] = ""
     brand: Optional[str] = ""
-    category: str  # top, bottom, dress, jacket, shoes, jewelry, accessory
+    category: str  # tops, bottoms, one-pieces, outerwear, shoes, bags, jewelry, hats, accessories
     subcategory: Optional[str] = None
+    gender: Optional[str] = "unisex"  # men | women | unisex
     style: Optional[List[str]] = []
     color: Optional[str] = None
     price: Optional[float] = None
     currency: Optional[str] = "PHP"
     image_url: str
-    source_platform: Optional[str] = "manual"
-    source_url: Optional[str] = None
+    garment_photo_type: Optional[str] = "auto"  # model | flat-lay | auto
+    source_platform: Optional[str] = "manual"  # platform/store name
+    source_url: Optional[str] = None  # legacy field
+    product_url: Optional[str] = None  # EXACT product listing URL
     tags: Optional[List[str]] = []
     active: bool = True
 
@@ -194,6 +265,28 @@ class TryOnInput(BaseModel):
     photo_base64: str  # user photo (data URL or base64)
     product_ids: List[str]
     adapter: Optional[str] = "mock"  # "mock" | "hf" (real IDM-VTON)
+
+
+class TryOnMultiInput(BaseModel):
+    gender: Optional[str] = "unisex"
+    photos: dict  # {"front": dataURL, "left": ..., "right": ..., "rear": ...}
+    product_ids: List[str]  # ordered outfit items
+
+
+class SettingsInput(BaseModel):
+    engine: Optional[str] = None      # mock | fashn
+    mode: Optional[str] = None        # fast | balanced | quality
+    resolution: Optional[str] = None  # 1k | 2k | 4k
+
+
+class ImportCSVInput(BaseModel):
+    payload: str  # raw CSV text
+    default_gender: Optional[str] = "unisex"
+
+
+class AdminTestRenderInput(BaseModel):
+    photo_base64: str
+    product_id: str
 
 
 class ImportJSONInput(BaseModel):
@@ -254,48 +347,61 @@ async def seed_admin_and_data():
     count = await db.products.count_documents({})
     if count == 0:
         sample = [
-            {"name": "Minimalist Tailored Trench Blazer", "brand": "Kultura", "category": "jacket", "style": ["Minimalist", "Formal"], "color": "Beige", "price": 4500, "currency": "PHP",
+            # ---- Women ----
+            {"name": "Minimalist Tailored Trench Blazer", "brand": "Kultura", "category": "outerwear", "gender": "women", "style": ["Minimalist", "Formal"], "color": "Beige", "price": 4500,
              "image_url": "https://images.unsplash.com/photo-1551232864-3f0890e580d9?crop=entropy&cs=srgb&fm=jpg&w=800&q=80",
-             "source_platform": "Zalora PH", "source_url": "https://www.zalora.com.ph/", "tags": ["outerwear", "editorial"]},
-            {"name": "Monochrome Oversized Suit Set", "brand": "Bench", "category": "top", "style": ["Modern", "Smart Casual"], "color": "Charcoal", "price": 3200, "currency": "PHP",
-             "image_url": "https://images.pexels.com/photos/5745783/pexels-photo-5745783.jpeg?auto=compress&cs=tinysrgb&w=800",
-             "source_platform": "Shopee", "source_url": "https://shopee.ph/", "tags": ["monochrome", "suit"]},
-            {"name": "Earthy Knit Top", "brand": "Penshoppe", "category": "top", "style": ["Casual", "Minimalist"], "color": "Cream", "price": 890, "currency": "PHP",
+             "source_platform": "Zalora PH", "product_url": "https://www.zalora.com.ph/p/kultura-tailored-trench-blazer-4500123.html", "garment_photo_type": "flat-lay", "tags": ["outerwear", "editorial"]},
+            {"name": "Earthy Knit Top", "brand": "Penshoppe", "category": "tops", "gender": "women", "style": ["Casual", "Minimalist"], "color": "Cream", "price": 890,
              "image_url": "https://images.pexels.com/photos/35675692/pexels-photo-35675692.jpeg?auto=compress&cs=tinysrgb&w=800",
-             "source_platform": "Lazada", "source_url": "https://www.lazada.com.ph/", "tags": ["knit"]},
-            {"name": "Slim Denim Jeans", "brand": "Bench", "category": "bottom", "style": ["Casual", "Streetwear"], "color": "Indigo", "price": 1490, "currency": "PHP",
-             "image_url": "https://images.unsplash.com/photo-1541099649105-f69ad21f3246?crop=entropy&cs=srgb&fm=jpg&w=800&q=80",
-             "source_platform": "Zalora PH", "source_url": "https://www.zalora.com.ph/", "tags": ["denim"]},
-            {"name": "Linen Wide-Leg Trousers", "brand": "Kultura", "category": "bottom", "style": ["Minimalist", "Formal"], "color": "Sand", "price": 1990, "currency": "PHP",
+             "source_platform": "Lazada", "product_url": "https://www.lazada.com.ph/products/earthy-knit-top-i2109887654.html", "garment_photo_type": "model", "tags": ["knit"]},
+            {"name": "Linen Wide-Leg Trousers", "brand": "Kultura", "category": "bottoms", "gender": "women", "style": ["Minimalist", "Formal"], "color": "Sand", "price": 1990,
              "image_url": "https://images.unsplash.com/photo-1548883354-94bcfe321cbb?crop=entropy&cs=srgb&fm=jpg&w=800&q=80",
-             "source_platform": "Shopee", "source_url": "https://shopee.ph/", "tags": ["linen"]},
-            {"name": "Silk Slip Dress", "brand": "Kashieca", "category": "dress", "style": ["Formal", "Modern"], "color": "Emerald", "price": 2790, "currency": "PHP",
+             "source_platform": "Shopee", "product_url": "https://shopee.ph/Linen-Wide-Leg-Trousers-i.123456.789012", "garment_photo_type": "flat-lay", "tags": ["linen"]},
+            {"name": "Silk Slip Dress", "brand": "Kashieca", "category": "one-pieces", "gender": "women", "style": ["Formal", "Modern"], "color": "Emerald", "price": 2790,
              "image_url": "https://images.unsplash.com/photo-1595777457583-95e059d581b8?crop=entropy&cs=srgb&fm=jpg&w=800&q=80",
-             "source_platform": "Lazada", "source_url": "https://www.lazada.com.ph/", "tags": ["silk", "evening"]},
-            {"name": "Filipiniana Modern Terno", "brand": "Kultura", "category": "dress", "style": ["Filipiniana", "Formal"], "color": "Ivory", "price": 6890, "currency": "PHP",
+             "source_platform": "Lazada", "product_url": "https://www.lazada.com.ph/products/silk-slip-dress-i3345566778.html", "garment_photo_type": "model", "tags": ["silk", "evening"]},
+            {"name": "Filipiniana Modern Terno", "brand": "Kultura", "category": "one-pieces", "gender": "women", "style": ["Filipiniana", "Formal"], "color": "Ivory", "price": 6890,
              "image_url": "https://images.unsplash.com/photo-1566174053879-31528523f8ae?crop=entropy&cs=srgb&fm=jpg&w=800&q=80",
-             "source_platform": "Kultura", "source_url": "https://kulturafilipino.com/", "tags": ["filipiniana", "traditional"]},
-            {"name": "Metallic Structured Tote", "brand": "SM Accessories", "category": "accessory", "subcategory": "bag", "style": ["Modern"], "color": "Silver", "price": 1990, "currency": "PHP",
-             "image_url": "https://images.unsplash.com/photo-1589363358751-ab05797e5629?crop=entropy&cs=srgb&fm=jpg&w=800&q=80",
-             "source_platform": "Shopee", "source_url": "https://shopee.ph/", "tags": ["bag"]},
-            {"name": "Gold Geometric Pendant", "brand": "Suyen Jewelry", "category": "jewelry", "subcategory": "necklace", "style": ["Minimalist"], "color": "Gold", "price": 1290, "currency": "PHP",
+             "source_platform": "Kultura", "product_url": None, "garment_photo_type": "model", "tags": ["filipiniana", "traditional"]},
+            {"name": "Gold Geometric Pendant", "brand": "Suyen Jewelry", "category": "jewelry", "gender": "women", "subcategory": "necklace", "style": ["Minimalist"], "color": "Gold", "price": 1290,
              "image_url": "https://images.unsplash.com/photo-1721103418218-416182aca079?crop=entropy&cs=srgb&fm=jpg&w=800&q=80",
-             "source_platform": "Lazada", "source_url": "https://www.lazada.com.ph/", "tags": ["gold"]},
-            {"name": "Tiered Gold Rings Set", "brand": "Aldo PH", "category": "jewelry", "subcategory": "ring", "style": ["Modern"], "color": "Gold", "price": 890, "currency": "PHP",
-             "image_url": "https://images.unsplash.com/photo-1543294001-f7cd5d7fb516?crop=entropy&cs=srgb&fm=jpg&w=800&q=80",
-             "source_platform": "Zalora PH", "source_url": "https://www.zalora.com.ph/", "tags": ["rings"]},
-            {"name": "White Leather Sneakers", "brand": "World Balance", "category": "shoes", "style": ["Casual", "Streetwear"], "color": "White", "price": 1590, "currency": "PHP",
+             "source_platform": "Lazada", "product_url": "https://www.lazada.com.ph/products/gold-geometric-pendant-i5567788990.html", "garment_photo_type": "flat-lay", "tags": ["gold"]},
+            # ---- Men ----
+            {"name": "Monochrome Oversized Suit Blazer", "brand": "Bench", "category": "outerwear", "gender": "men", "style": ["Modern", "Smart Casual"], "color": "Charcoal", "price": 3200,
+             "image_url": "https://images.pexels.com/photos/5745783/pexels-photo-5745783.jpeg?auto=compress&cs=tinysrgb&w=800",
+             "source_platform": "Shopee", "product_url": "https://shopee.ph/Monochrome-Oversized-Blazer-i.223344.556677", "garment_photo_type": "model", "tags": ["monochrome", "suit"]},
+            {"name": "Classic White Oxford Shirt", "brand": "Penshoppe", "category": "tops", "gender": "men", "style": ["Smart Casual", "Formal"], "color": "White", "price": 1290,
+             "image_url": "https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?crop=entropy&cs=srgb&fm=jpg&w=800&q=80",
+             "source_platform": "Lazada", "product_url": "https://www.lazada.com.ph/products/classic-white-oxford-shirt-i7788990011.html", "garment_photo_type": "model", "tags": ["shirt"]},
+            {"name": "Slim Denim Jeans", "brand": "Bench", "category": "bottoms", "gender": "men", "style": ["Casual", "Streetwear"], "color": "Indigo", "price": 1490,
+             "image_url": "https://images.unsplash.com/photo-1541099649105-f69ad21f3246?crop=entropy&cs=srgb&fm=jpg&w=800&q=80",
+             "source_platform": "Zalora PH", "product_url": "https://www.zalora.com.ph/p/bench-slim-denim-jeans-1490998.html", "garment_photo_type": "flat-lay", "tags": ["denim"]},
+            {"name": "Structured Baseball Cap", "brand": "World Balance", "category": "hats", "gender": "men", "style": ["Casual", "Streetwear"], "color": "Black", "price": 590,
+             "image_url": "https://images.unsplash.com/photo-1588850561407-ed78c282e89b?crop=entropy&cs=srgb&fm=jpg&w=800&q=80",
+             "source_platform": "Shopee", "product_url": "https://shopee.ph/Structured-Baseball-Cap-i.334455.667788", "garment_photo_type": "flat-lay", "tags": ["cap"]},
+            # ---- Unisex ----
+            {"name": "White Leather Sneakers", "brand": "World Balance", "category": "shoes", "gender": "unisex", "style": ["Casual", "Streetwear"], "color": "White", "price": 1590,
              "image_url": "https://images.unsplash.com/photo-1549298916-b41d501d3772?crop=entropy&cs=srgb&fm=jpg&w=800&q=80",
-             "source_platform": "Shopee", "source_url": "https://shopee.ph/", "tags": ["sneakers"]},
-            {"name": "Leather Ankle Boots", "brand": "Rusty Lopez", "category": "shoes", "style": ["Formal", "Modern"], "color": "Black", "price": 2490, "currency": "PHP",
+             "source_platform": "Shopee", "product_url": "https://shopee.ph/White-Leather-Sneakers-i.445566.778899", "garment_photo_type": "flat-lay", "tags": ["sneakers"]},
+            {"name": "Leather Ankle Boots", "brand": "Rusty Lopez", "category": "shoes", "gender": "unisex", "style": ["Formal", "Modern"], "color": "Black", "price": 2490,
              "image_url": "https://images.unsplash.com/photo-1543163521-1bf539c55dd2?crop=entropy&cs=srgb&fm=jpg&w=800&q=80",
-             "source_platform": "Lazada", "source_url": "https://www.lazada.com.ph/", "tags": ["boots"]},
+             "source_platform": "Lazada", "product_url": "https://www.lazada.com.ph/products/leather-ankle-boots-i9900112233.html", "garment_photo_type": "flat-lay", "tags": ["boots"]},
+            {"name": "Metallic Structured Tote", "brand": "SM Accessories", "category": "bags", "gender": "unisex", "subcategory": "bag", "style": ["Modern"], "color": "Silver", "price": 1990,
+             "image_url": "https://images.unsplash.com/photo-1589363358751-ab05797e5629?crop=entropy&cs=srgb&fm=jpg&w=800&q=80",
+             "source_platform": "Shopee", "product_url": None, "garment_photo_type": "flat-lay", "tags": ["bag"]},
         ]
         now = datetime.now(timezone.utc).isoformat()
         for p in sample:
             p.setdefault("description", "")
             p.setdefault("subcategory", None)
             p.setdefault("tags", [])
+            p.setdefault("currency", "PHP")
+            p.setdefault("gender", "unisex")
+            p.setdefault("garment_photo_type", "auto")
+            purl = p.get("product_url")
+            p["source_url"] = purl
+            # Seed demo links are illustrative; flag them so admin verifies/replaces.
+            p["url_status"] = "example" if purl else "missing"
             p["active"] = True
             p["created_at"] = now
             p["updated_at"] = now
@@ -555,13 +661,19 @@ async def reset_password(input: ResetPasswordInput):
 @api.get("/products")
 async def list_products(
     category: Optional[str] = None,
+    gender: Optional[str] = None,
     style: Optional[str] = None,
     search: Optional[str] = None,
     limit: int = Query(60, le=200),
 ):
     q: dict = {"active": True}
     if category:
-        q["category"] = category
+        q["category"] = canonical_category(category)
+    if gender:
+        g = normalize_gender(gender)
+        if g in ("men", "women"):
+            # data-level gender filter: show the gender's items + unisex
+            q["gender"] = {"$in": [g, "unisex", None]}
     if style:
         q["style"] = style
     if search:
@@ -573,6 +685,14 @@ async def list_products(
     cursor = db.products.find(q).limit(limit)
     docs = await cursor.to_list(length=limit)
     return [serialize_doc(d) for d in docs]
+
+
+@api.get("/categories")
+async def list_categories(gender: Optional[str] = None):
+    """Return the category menu appropriate for the selected gender."""
+    g = normalize_gender(gender)
+    cats = GENDER_CATEGORIES.get(g, CANONICAL_CATEGORIES)
+    return {"gender": g, "categories": cats}
 
 
 @api.get("/products/{product_id}")
@@ -809,6 +929,195 @@ async def generate_tryon(input: TryOnInput, user: dict = Depends(get_current_use
     return serialize_doc(session)
 
 
+# -------------------- Try-On (multi-view, outfit chaining) --------------------
+VIEW_KEYS = ["front", "left", "right", "rear"]
+
+
+async def _fetch_bytes(url: str) -> Optional[bytes]:
+    try:
+        async with _httpx.AsyncClient(timeout=25, follow_redirects=True) as c:
+            r = await c.get(url)
+            r.raise_for_status()
+            return r.content
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Garment fetch failed ({url[:60]}): {e}")
+        return None
+
+
+def _order_products_for_chaining(products: List[dict]) -> List[dict]:
+    def key(p):
+        cat = canonical_category(p.get("category"))
+        try:
+            return _CHAIN_ORDER.index(cat)
+        except ValueError:
+            return len(_CHAIN_ORDER)
+    return sorted(products, key=key)
+
+
+async def _process_multiview(session_id, user_id: str, photos: dict, products: List[dict], settings: dict):
+    """Background task: chain garments onto each provided view, store renders."""
+    engine = settings["engine"]
+    mode = settings["mode"]
+    resolution = settings["resolution"]
+    ordered = _order_products_for_chaining(products)
+
+    # Which products can actually be rendered by the current engine.
+    def is_renderable(p) -> bool:
+        cat = canonical_category(p.get("category"))
+        if engine == "mock":
+            return True
+        return cat in RENDERABLE_CATEGORIES
+
+    # Pre-fetch garment bytes (for mock) once.
+    garment_cache: dict = {}
+    for p in ordered:
+        if is_renderable(p):
+            garment_cache[p["id"]] = await _fetch_bytes(p.get("image_url", ""))
+
+    views_out: dict = {}
+    any_ok = False
+    first_error = None
+
+    for vk in VIEW_KEYS:
+        data_url = photos.get(vk)
+        if not data_url:
+            continue
+        try:
+            person_bytes, _ct = _decode_data_url(data_url)
+        except Exception:
+            continue
+
+        applied = []
+        view_error = None
+        for p in ordered:
+            if not is_renderable(p):
+                continue
+            cat = canonical_category(p.get("category"))
+            gtype = p.get("garment_photo_type") or "auto"
+            if engine == "fashn":
+                outcome = await asyncio.to_thread(
+                    render_one_fashn,
+                    person_bytes,
+                    p.get("image_url"),
+                    garment_cache.get(p["id"]),
+                    _FASHN_CATEGORY.get(cat, "auto"),
+                    gtype,
+                    mode,
+                    resolution,
+                )
+            else:
+                gb = garment_cache.get(p["id"]) or person_bytes
+                outcome = await asyncio.to_thread(render_one_mock, person_bytes, gb)
+
+            if outcome.ok and outcome.image_bytes:
+                person_bytes = outcome.image_bytes
+                applied.append(p["id"])
+            else:
+                view_error = outcome.error
+                if first_error is None:
+                    first_error = outcome.error
+
+        # store the (possibly chained) view render
+        file_id = None
+        try:
+            rec = await save_bytes_for_user(user_id, "renders", person_bytes, "image/png")
+            file_id = str(rec["_id"])
+            any_ok = True
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"View render store failed ({vk}): {e}")
+            view_error = view_error or str(e)[:200]
+
+        views_out[vk] = {"file_id": file_id, "applied_product_ids": applied, "error": view_error}
+
+    status = "COMPLETED" if any_ok else "FAILED"
+    await db.try_on_sessions.update_one(
+        {"_id": session_id},
+        {"$set": {
+            "status": status,
+            "views": views_out,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "error": None if any_ok else (first_error or "All views failed to render"),
+        }},
+    )
+
+
+@api.post("/tryon/multiview")
+async def generate_multiview(input: TryOnMultiInput, user: dict = Depends(get_current_user)):
+    """4-view outfit try-on. Chains selected garments across the provided photos.
+    Returns immediately with status 'processing'; poll GET /tryon/sessions/{id}."""
+    photos = {k: v for k, v in (input.photos or {}).items() if k in VIEW_KEYS and v}
+    if not photos.get("front"):
+        raise HTTPException(status_code=400, detail="A front photo is required")
+    if not input.product_ids:
+        raise HTTPException(status_code=400, detail="Select at least one product")
+
+    products = []
+    for pid in input.product_ids:
+        try:
+            p = await db.products.find_one({"_id": ObjectId(pid)})
+            if p:
+                products.append(serialize_doc(p))
+        except Exception:
+            continue
+    if not products:
+        raise HTTPException(status_code=404, detail="No valid products")
+
+    settings = await get_settings()
+
+    # Store the user's photos (private)
+    photo_file_ids = {}
+    for vk, durl in photos.items():
+        try:
+            pb, pct = _decode_data_url(durl)
+            rec = await save_bytes_for_user(user["id"], "photos", pb, pct)
+            photo_file_ids[vk] = str(rec["_id"])
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Photo store failed ({vk}): {e}")
+
+    # items_used snapshot (all selected products, with render capability + links)
+    items_used = []
+    for p in products:
+        cat = canonical_category(p.get("category"))
+        renderable = True if settings["engine"] == "mock" else (cat in RENDERABLE_CATEGORIES)
+        items_used.append({
+            "product_id": p["id"],
+            "name": p.get("name"),
+            "brand": p.get("brand"),
+            "category": cat,
+            "price": p.get("price"),
+            "currency": p.get("currency", "PHP"),
+            "image_url": p.get("image_url"),
+            "platform": p.get("source_platform") or p.get("platform"),
+            "product_url": p.get("product_url") or p.get("source_url"),
+            "url_status": p.get("url_status", "ok" if (p.get("product_url") or p.get("source_url")) else "missing"),
+            "rendered": renderable,
+        })
+
+    session = {
+        "user_id": user["id"],
+        "kind": "multiview",
+        "engine": settings["engine"],
+        "mode": settings["mode"],
+        "resolution": settings["resolution"],
+        "gender": normalize_gender(input.gender),
+        "status": "processing",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": None,
+        "product_ids": input.product_ids,
+        "items_used": items_used,
+        "photo_file_ids": photo_file_ids,
+        "views": {},
+        "error": None,
+        "is_favorite": False,
+    }
+    r = await db.try_on_sessions.insert_one(session)
+    session["_id"] = r.inserted_id
+
+    asyncio.create_task(_process_multiview(r.inserted_id, user["id"], photos, products, settings))
+    return serialize_doc(session)
+
+
+
 @api.get("/tryon/sessions")
 async def list_sessions(user: dict = Depends(get_current_user)):
     docs = await db.try_on_sessions.find({"user_id": user["id"]}).sort("started_at", -1).to_list(length=100)
@@ -1030,6 +1339,13 @@ async def admin_list_products(_admin: dict = Depends(require_admin), limit: int 
 async def admin_create_product(input: ProductInput, admin: dict = Depends(require_admin)):
     now = datetime.now(timezone.utc).isoformat()
     doc = input.model_dump()
+    doc["category"] = canonical_category(doc.get("category"))
+    doc["gender"] = normalize_gender(doc.get("gender"))
+    purl = doc.get("product_url") or doc.get("source_url")
+    doc["product_url"] = purl
+    doc["source_url"] = purl
+    doc["url_status"] = "ok" if purl else "missing"
+    doc["admin_edited"] = True
     doc["created_at"] = now
     doc["updated_at"] = now
     r = await db.products.insert_one(doc)
@@ -1045,6 +1361,13 @@ async def admin_create_product(input: ProductInput, admin: dict = Depends(requir
 async def admin_update_product(product_id: str, input: ProductInput, admin: dict = Depends(require_admin)):
     now = datetime.now(timezone.utc).isoformat()
     doc = input.model_dump()
+    doc["category"] = canonical_category(doc.get("category"))
+    doc["gender"] = normalize_gender(doc.get("gender"))
+    purl = doc.get("product_url") or doc.get("source_url")
+    doc["product_url"] = purl
+    doc["source_url"] = purl
+    doc["url_status"] = "ok" if purl else "missing"
+    doc["admin_edited"] = True
     doc["updated_at"] = now
     try:
         r = await db.products.update_one({"_id": ObjectId(product_id)}, {"$set": doc})
@@ -1085,6 +1408,140 @@ async def admin_users(_admin: dict = Depends(require_admin)):
 async def admin_audit(_admin: dict = Depends(require_admin), limit: int = 100):
     docs = await db.audit_logs.find({}).sort("timestamp", -1).to_list(length=limit)
     return [serialize_doc(d) for d in docs]
+
+
+# -------------------- Admin: Settings, CSV import, Test render --------------------
+@api.get("/admin/settings")
+async def admin_get_settings(_admin: dict = Depends(require_admin)):
+    return await get_settings()
+
+
+@api.put("/admin/settings")
+async def admin_update_settings(input: SettingsInput, admin: dict = Depends(require_admin)):
+    update = {}
+    if input.engine in ("mock", "fashn"):
+        update["engine"] = input.engine
+    if input.mode in ("fast", "balanced", "quality"):
+        update["mode"] = input.mode
+    if input.resolution in ("1k", "2k", "4k"):
+        update["resolution"] = input.resolution
+    if update:
+        await db.app_settings.update_one({"_id": "tryon"}, {"$set": update}, upsert=True)
+    return await get_settings()
+
+
+@api.post("/admin/import/csv")
+async def admin_import_csv(input: ImportCSVInput, admin: dict = Depends(require_admin)):
+    """Bulk import products from CSV text. Columns (case-insensitive):
+    product_name/name, gender, category, price, currency, image_url,
+    product_url, platform, garment_photo_type, brand, description, color."""
+    import csv as _csv
+    import io as _io
+
+    reader = _csv.DictReader(_io.StringIO(input.payload))
+    now = datetime.now(timezone.utc).isoformat()
+    saved = 0
+    errors = 0
+    samples = []
+
+    def g(row, *keys, default=None):
+        for k in row:
+            if k and k.strip().lower() in keys:
+                v = (row[k] or "").strip()
+                if v:
+                    return v
+        return default
+
+    for row in reader:
+        try:
+            name = g(row, "product_name", "name")
+            image_url = g(row, "image_url", "image")
+            if not name or not image_url:
+                errors += 1
+                if len(samples) < 5:
+                    samples.append(f"Missing name/image_url: {dict(row)}")
+                continue
+            product_url = g(row, "product_url", "url")
+            price_raw = g(row, "price")
+            try:
+                price = float(str(price_raw).replace(",", "")) if price_raw else None
+            except Exception:
+                price = None
+            doc = {
+                "name": name,
+                "description": g(row, "description", default=""),
+                "brand": g(row, "brand", default=""),
+                "category": canonical_category(g(row, "category", default="accessories")),
+                "gender": normalize_gender(g(row, "gender", default=input.default_gender)),
+                "color": g(row, "color"),
+                "price": price,
+                "currency": g(row, "currency", default="PHP"),
+                "image_url": image_url,
+                "garment_photo_type": (g(row, "garment_photo_type", "photo_type", default="auto") or "auto").lower(),
+                "source_platform": g(row, "platform", "source_platform", default="manual"),
+                "product_url": product_url,
+                "source_url": product_url,
+                "url_status": "ok" if product_url else "missing",
+                "tags": [],
+                "active": True,
+                "updated_at": now,
+                "imported_at": now,
+                "created_by_admin": admin["id"],
+            }
+            filt = {"product_url": product_url} if product_url else {"name": name, "brand": doc["brand"]}
+            existing = await db.products.find_one(filt)
+            if existing:
+                await db.products.update_one({"_id": existing["_id"]}, {"$set": doc})
+            else:
+                doc["created_at"] = now
+                await db.products.insert_one(doc)
+            saved += 1
+        except Exception as e:  # noqa: BLE001
+            errors += 1
+            if len(samples) < 5:
+                samples.append(str(e)[:150])
+
+    await db.import_jobs.insert_one({
+        "admin_id": admin["id"], "source": "csv", "status": "success" if saved else "error",
+        "imported": saved, "saved": saved, "errors": errors, "error_samples": samples,
+        "message": f"CSV import: {saved} saved, {errors} errors", "timestamp": now,
+    })
+    return {"status": "success" if saved else "error", "saved": saved, "errors": errors, "error_samples": samples}
+
+
+@api.post("/admin/tryon/test")
+async def admin_test_render(input: AdminTestRenderInput, admin: dict = Depends(require_admin)):
+    """Single-garment / single-photo render — cheap smoke test of the live engine."""
+    if not input.photo_base64:
+        raise HTTPException(status_code=400, detail="Photo required")
+    try:
+        p = await db.products.find_one({"_id": ObjectId(input.product_id)})
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid product id")
+    if not p:
+        raise HTTPException(status_code=404, detail="Product not found")
+    product = serialize_doc(p)
+    settings = await get_settings()
+    person_bytes, _ = _decode_data_url(input.photo_base64)
+    cat = canonical_category(product.get("category"))
+    gtype = product.get("garment_photo_type") or "auto"
+
+    if settings["engine"] == "fashn":
+        garment_bytes = await _fetch_bytes(product.get("image_url", ""))
+        outcome = await asyncio.to_thread(
+            render_one_fashn, person_bytes, product.get("image_url"), garment_bytes,
+            _FASHN_CATEGORY.get(cat, "auto"), gtype, settings["mode"], settings["resolution"],
+        )
+    else:
+        garment_bytes = await _fetch_bytes(product.get("image_url", "")) or person_bytes
+        outcome = await asyncio.to_thread(render_one_mock, person_bytes, garment_bytes)
+
+    if not outcome.ok:
+        return {"ok": False, "engine": outcome.engine, "error": outcome.error,
+                "credits_estimate": outcome.credits}
+    b64 = base64.b64encode(outcome.image_bytes).decode("ascii")
+    return {"ok": True, "engine": outcome.engine, "credits_estimate": outcome.credits,
+            "image": f"data:image/png;base64,{b64}"}
 
 
 # -------------------- Admin: Product Import Connectors --------------------

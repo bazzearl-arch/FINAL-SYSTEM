@@ -34,7 +34,7 @@ export default function Navbar() {
           <span className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
             <Sparkles size={16} className="text-primary-foreground" />
           </span>
-          <span className="font-serif text-xl tracking-tight">Atelier<span className="brand-gold">AI</span></span>
+          <span className="font-serif text-xl tracking-tight">AI Try-on<span className="brand-gold"> PH</span></span>
         </Link>
 
         <nav className="hidden md:flex items-center gap-1">

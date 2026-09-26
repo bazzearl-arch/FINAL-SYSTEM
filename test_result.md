@@ -102,7 +102,7 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Verify the authentication flows on the AtelierAI web app (React + FastAPI). Test: 1) Sign in with admin credentials, 2) Sign up with new user, 3) Session persistence after reload, 4) Logout functionality."
+user_problem_statement: "AI Try-on PH rescue build. New backend features to test: multi-view outfit try-on (mock engine), gender-specific product/category filtering, admin settings, CSV product import, and single-render test endpoint."
 
 frontend:
   - task: "Sign In - Admin User Authentication"
@@ -182,20 +182,99 @@ backend:
     status_history:
         - working: true
           agent: "testing"
-          comment: "All auth endpoints working correctly: POST /api/auth/login (200), POST /api/auth/register (200), POST /api/auth/logout (200), GET /api/auth/me (200 when authenticated, 401 when not authenticated). Session cookies are being set and validated correctly."
+          comment: "All auth endpoints working: login/register/logout/me. Do NOT retest unless regression suspected."
+
+  - task: "Gender-specific product & category filtering"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "NEW. GET /api/products?gender=men should return men+unisex and NO 'one-pieces' (no dresses). gender=women should include 'one-pieces'. GET /api/categories?gender=men returns men menu (no one-pieces); gender=women includes one-pieces. GET /api/products?category=<canonical> filters correctly. Canonical categories: tops,bottoms,one-pieces,outerwear,shoes,bags,jewelry,hats,accessories."
+        - working: true
+          agent: "testing"
+          comment: "ALL 5 CHECKS PASSED. GET /products?gender=men returned 7 products with NO 'one-pieces' category. GET /products?gender=women returned 9 products including 2 'one-pieces' items. GET /categories?gender=men returned ['tops','bottoms','outerwear','shoes','hats','bags','accessories'] (no one-pieces). GET /categories?gender=women returned ['tops','bottoms','one-pieces','outerwear','shoes','hats','bags','jewelry','accessories'] (includes one-pieces). GET /products?category=tops returned 2 products, all with category='tops'. Gender and category filtering working correctly."
+
+  - task: "Multi-view outfit try-on (mock engine, chaining)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "NEW. POST /api/tryon/multiview (auth required) body {gender, photos:{front,left,right,rear as data URLs}, product_ids:[...]}. Requires 'front' photo + >=1 product else 400. Returns session with status 'processing' immediately. Background task chains garments per view then sets status COMPLETED with 'views' map {front/left/right/rear: {file_id, applied_product_ids, error}} and 'items_used' list. Poll GET /api/tryon/sessions/{id} until status != processing (allow ~15s). Verify each completed view has a file_id and GET /api/files/{file_id} (auth, owner) returns an image. Engine defaults to 'mock' (no FASHN key) so all products render. Use a small base64 JPEG/PNG data URL for photos. Test with admin@gmail.com/adminpass."
+        - working: true
+          agent: "testing"
+          comment: "ALL 9 CHECKS PASSED. Admin login successful. POST /tryon/multiview with 4 photos (front/left/right/rear) and 3 product_ids returned 200 with session_id and status='processing'. Session completed in ~3 seconds with status='COMPLETED'. All 4 views have file_ids (front: 6ab7bb79487db705204d7a73, left: 6ab7bb7a487db705204d7a74, right: 6ab7bb7a487db705204d7a75, rear: 6ab7bb7a487db705204d7a76). Items_used array contains 3 items matching selected products with correct product_url and url_status fields. GET /files/{file_id} returned 200 with image/png content-type (199953 bytes). Validation tests: missing front photo returned 400, empty product_ids returned 400. Multi-view try-on working correctly with mock engine."
+
+  - task: "Admin settings (engine/mode/resolution)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "NEW. GET /api/admin/settings (admin) returns engine/mode/resolution/fashn_key_configured. PUT /api/admin/settings updates them (engine mock|fashn, mode fast|balanced|quality, resolution 1k|2k|4k). Non-admin should get 403."
+        - working: true
+          agent: "testing"
+          comment: "ALL 5 CHECKS PASSED. GET /admin/settings (admin) returned 200 with {engine:'mock', mode:'balanced', resolution:'1k', fashn_key_configured:false}. PUT /admin/settings with {mode:'quality'} returned 200 and persisted the change (mode now 'quality'). Non-admin user (testuser_1790425975@example.com) received 403 when attempting GET /admin/settings. Admin settings endpoint working correctly with proper authorization."
+
+  - task: "Admin CSV product import"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "NEW. POST /api/admin/import/csv (admin) body {payload: <raw CSV text>}. Columns: product_name,gender,category,price,currency,image_url,product_url,platform,garment_photo_type. Rows missing name/image_url counted as errors. Products with product_url get url_status 'ok', without get 'missing'. Returns {status, saved, errors, error_samples}. Verify saved products appear in GET /api/admin/products with correct gender/category/product_url."
+        - working: true
+          agent: "testing"
+          comment: "ALL 7 CHECKS PASSED. POST /admin/import/csv with 2-row CSV returned 200 with {status:'success', saved:2, errors:0, error_samples:[]}. GET /admin/products confirmed both products exist: 'Test Tee' (men/tops/499 PHP) has product_url='https://shopee.ph/test-tee-i.1.2' and url_status='ok'. 'No URL Item' (women/bottoms/299 PHP) has product_url=None and url_status='missing'. CSV import working correctly with proper url_status assignment based on product_url presence."
+
+  - task: "Admin single-render test endpoint"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "NEW. POST /api/admin/tryon/test (admin) body {photo_base64, product_id}. With mock engine returns {ok:true, engine:'mock', credits_estimate:0, image:dataURL}. Invalid product_id -> 400/404."
+        - working: true
+          agent: "testing"
+          comment: "ALL 6 CHECKS PASSED. POST /admin/tryon/test with valid photo_base64 and product_id returned 200 with {ok:true, engine:'mock', credits_estimate:0, image:'data:image/png;base64,...'}. Image data URL is 216154 chars long. Invalid product_id returned 400 as expected. Admin test render endpoint working correctly with mock engine."
 
 metadata:
-  created_by: "testing_agent"
-  version: "1.0"
-  test_sequence: 2
-  run_ui: true
-  last_tested: "2024-09-24"
+  created_by: "main_agent"
+  version: "2.0"
+  test_sequence: 4
+  run_ui: false
+  last_tested: "2025-01-26"
 
 test_plan:
   current_focus:
-    - "CORS regression testing completed - all auth flows verified"
+    - "Multi-view outfit try-on (mock engine, chaining)"
+    - "Gender-specific product & category filtering"
+    - "Admin CSV product import"
+    - "Admin settings (engine/mode/resolution)"
+    - "Admin single-render test endpoint"
   stuck_tasks: []
-  test_all: true
+  test_all: false
   test_priority: "high_first"
 
 agent_communication:
@@ -204,4 +283,8 @@ agent_communication:
     - agent: "testing"
       message: "REGRESSION TEST COMPLETED after CORS config change. Tested all auth flows with detailed network monitoring. Results: 1) Sign In (admin@gmail.com): POST /api/auth/login returned 200, no CORS errors, successful redirect to /admin. 2) Sign Up (testuser+1790270089@example.com): POST /api/auth/register returned 200, no CORS errors, successful redirect to /profile. 3) Google Sign-In: Redirect to accounts.google.com successful, no CORS errors from AtelierAI app. Note: No OPTIONS preflight requests detected for /api/auth/* endpoints (normal for same-origin or simple requests). CORS config change verified working correctly."
     - agent: "testing"
-      message: "PRODUCTION URL VERIFICATION COMPLETED (2024-09-24). Tested all auth flows using EXACT production URL: https://creds-config.preview.emergentagent.com. ALL 4 TESTS PASSED: 1) Sign In: POST /api/auth/login returned 200 OK, correct host verified, redirected to /admin, Admin Console rendered. 2) Sign Up: POST /api/auth/register returned 200 OK, correct host verified, created testuser+1790270579@example.com, redirected to /profile, auto-login successful. 3) Google Sign-In: Button clicked, successfully redirected to accounts.google.com OAuth flow, no app-side errors. 4) Session Persistence: GET /api/auth/me returned 200 OK, correct host verified, session persisted after reload. CRITICAL CONFIRMATIONS: ✓ All API requests went to creds-config.preview.emergentagent.com (NO other hosts used). ✓ All HTTP statuses: 200 OK. ✓ NO 'Network Error' detected. ✓ NO CORS errors detected. Authentication system fully operational on production URL."
+      message: "PRODUCTION URL VERIFICATION COMPLETED (2024-09-24). All auth flows passed on https://creds-config.preview.emergentagent.com. No CORS/Network errors."
+    - agent: "main"
+      message: "AI Try-on PH rescue - Phase 1 backend built. Please test the 5 NEW backend tasks in current_focus (auth already verified, skip it). Engine is 'mock' (no FASHN key yet) so all products render locally. Storage uses local-disk fallback (EMERGENT_LLM_KEY absent) so /api/files/{id} should serve images. Admin creds: admin@gmail.com / adminpass. For multiview, use tiny base64 image data URLs for the 4 photos and 2-3 product_ids from GET /api/products."
+    - agent: "testing"
+      message: "COMPREHENSIVE BACKEND TESTING COMPLETED (2025-01-26). All 5 NEW backend features tested with 32 test cases - 100% SUCCESS RATE. Results: 1) Gender/category filtering: All 5 checks passed - men products exclude 'one-pieces', women include 'one-pieces', category filters work correctly. 2) Multi-view outfit try-on: All 9 checks passed - session completes in ~3s with status COMPLETED, all 4 views have file_ids, file download works, validation (missing front/empty products) returns 400. 3) Admin settings: All 5 checks passed - GET/PUT work, engine='mock', fashn_key_configured=false, non-admin gets 403. 4) CSV import: All 7 checks passed - 2 products saved, url_status correctly set ('ok' vs 'missing'). 5) Test render: All 6 checks passed - returns data URL image, invalid product_id returns 400. Mock engine working correctly. No issues found. Ready for production."

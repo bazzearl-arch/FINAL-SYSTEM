@@ -31,7 +31,7 @@ export default function SignupPage() {
     <main data-testid="signup-page" className="min-h-[calc(100vh-4rem)] flex items-center justify-center px-4 py-16">
       <div className="w-full max-w-md bg-card border border-border rounded-2xl shadow-sm p-8">
         <p className="overline-label text-muted-foreground">Create Account</p>
-        <h1 className="font-serif text-3xl mt-2">Begin your Atelier</h1>
+        <h1 className="font-serif text-3xl mt-2">Create your AI Try-on PH account</h1>
         <p className="text-sm text-muted-foreground mt-2">Free forever. Your photos remain private.</p>
 
         <div className="mt-6">

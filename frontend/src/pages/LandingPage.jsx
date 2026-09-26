@@ -20,13 +20,13 @@ export default function LandingPage() {
               Research Prototype · Web-based AI Virtual Try-On
             </p>
             <h1 className="font-serif text-4xl sm:text-5xl lg:text-6xl leading-[1.05] tracking-tight">
-              The Atelier of{" "}
-              <span className="italic text-brand-gold">Intelligent Style</span>.
+              AI Try-on{" "}
+              <span className="italic text-brand-gold">for the way you shop PH</span>.
             </h1>
             <p className="mt-6 text-lg text-muted-foreground max-w-xl leading-relaxed">
-              Discover Filipino & global fashion, build outfits on our canvas,
-              and preview them on you — powered by an AI virtual try-on adapter
-              designed for VITON-HD integration.
+              Discover Filipino & global fashion, pick a full outfit, and see it
+              on you from four angles — powered by a professional AI virtual
+              try-on engine.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Button asChild size="lg" className="rounded-full h-12 px-6 gap-2" data-testid="hero-cta-tryon">
@@ -122,7 +122,7 @@ export default function LandingPage() {
               Ready to see it on you?
             </h2>
             <p className="mt-4 text-primary-foreground/70 text-base leading-relaxed">
-              Start your Atelier account, build a wardrobe, and preview outfits.
+              Start your AI Try-on PH account, build a wardrobe, and preview outfits.
               All virtual try-on results remain private to you.
             </p>
             <div className="mt-8 flex gap-3">
@@ -138,7 +138,7 @@ export default function LandingPage() {
       </section>
 
       <footer className="border-t border-border py-10 text-center text-sm text-muted-foreground">
-        <p>© {new Date().getFullYear()} AtelierAI · Research Prototype · No internal checkout.</p>
+        <p>© {new Date().getFullYear()} AI Try-on PH · Research Prototype · No internal checkout.</p>
       </footer>
     </main>
   );

@@ -209,3 +209,143 @@ def get_adapter(name: str):
     if name in ("hf", "hfidmvton", "hf-idm-vton", "idm-vton", "real"):
         return HFIDMVTONAdapter()
     return MockDevelopmentAdapter()
+
+
+# =====================================================================
+# Multi-view / multi-garment rendering engine (AI Try-on PH)
+# ---------------------------------------------------------------------
+# A single "render one garment onto one person photo" primitive that the
+# server orchestrates per-view and per-garment (outfit chaining).
+#   engine="mock"  -> free local Pillow composite (Stage 1 / no key)
+#   engine="fashn" -> FASHN Try-On Max direct API (needs FASHN_API_KEY)
+# =====================================================================
+
+FASHN_API_KEY = os.environ.get("FASHN_API_KEY")
+FASHN_BASE = os.environ.get("FASHN_API_BASE", "https://api.fashn.ai/v1").rstrip("/")
+FASHN_MODEL = os.environ.get("FASHN_MODEL", "tryon-max")
+
+
+def _bytes_to_data_uri(data: bytes, content_type: str = "image/png") -> str:
+    return f"data:{content_type};base64," + base64.b64encode(data).decode("ascii")
+
+
+@dataclass
+class RenderOutcome:
+    ok: bool
+    image_bytes: Optional[bytes] = None
+    error: Optional[str] = None
+    engine: str = "mock"
+    credits: int = 0
+
+
+def render_one_mock(person_bytes: bytes, garment_bytes: bytes) -> RenderOutcome:
+    """Deterministic local composite (free). Clearly a placeholder, not inference."""
+    try:
+        composed = _compose_mock(person_bytes, garment_bytes)
+        return RenderOutcome(ok=True, image_bytes=_to_png_bytes(composed), engine="mock", credits=0)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Mock render failed: {e}")
+        return RenderOutcome(ok=False, error=str(e)[:300], engine="mock")
+
+
+# credits matrix per FASHN docs (generation_mode x resolution)
+_FASHN_CREDITS = {
+    ("fast", "1k"): 1, ("fast", "2k"): 2, ("fast", "4k"): 3,
+    ("balanced", "1k"): 2, ("balanced", "2k"): 3, ("balanced", "4k"): 4,
+    ("quality", "1k"): 3, ("quality", "2k"): 4, ("quality", "4k"): 5,
+}
+
+
+def render_one_fashn(
+    person_bytes: bytes,
+    garment_image_url: Optional[str],
+    garment_bytes: Optional[bytes],
+    category: str = "auto",
+    garment_photo_type: str = "auto",
+    mode: str = "balanced",
+    resolution: str = "1k",
+) -> RenderOutcome:
+    """Render one garment onto one person photo via FASHN Try-On Max (direct API).
+
+    person_bytes  -> model_image (data URI)
+    garment       -> product_image (public URL preferred, else data URI)
+    Blocking; call via asyncio.to_thread.
+    """
+    import requests  # local import; requests is a backend dep
+
+    if not FASHN_API_KEY:
+        return RenderOutcome(ok=False, error="FASHN_API_KEY not configured", engine="fashn")
+
+    mode = (mode or "balanced").lower()
+    resolution = (resolution or "1k").lower()
+    credits = _FASHN_CREDITS.get((mode, resolution), 2)
+
+    model_image = _bytes_to_data_uri(person_bytes, "image/png")
+    if garment_image_url:
+        product_image = garment_image_url
+    elif garment_bytes:
+        product_image = _bytes_to_data_uri(garment_bytes, "image/png")
+    else:
+        return RenderOutcome(ok=False, error="No garment image", engine="fashn")
+
+    inputs = {
+        "product_image": product_image,
+        "model_image": model_image,
+        "resolution": resolution,
+        "generation_mode": mode,
+        "num_images": 1,
+    }
+    # category / garment_photo_type are accepted by FASHN try-on models and
+    # improve extraction; include when meaningfully set.
+    if category and category != "auto":
+        inputs["category"] = category
+    if garment_photo_type and garment_photo_type != "auto":
+        inputs["garment_photo_type"] = garment_photo_type
+
+    headers = {"Authorization": f"Bearer {FASHN_API_KEY}", "Content-Type": "application/json"}
+    start = time.time()
+    try:
+        run = requests.post(
+            f"{FASHN_BASE}/run",
+            headers=headers,
+            json={"model_name": FASHN_MODEL, "inputs": inputs},
+            timeout=60,
+        )
+        if run.status_code >= 400:
+            return RenderOutcome(ok=False, error=f"FASHN run {run.status_code}: {run.text[:300]}", engine="fashn")
+        job_id = run.json().get("id")
+        if not job_id:
+            return RenderOutcome(ok=False, error="FASHN did not return a job id", engine="fashn")
+
+        # Poll status (FASHN jobs typically finish in seconds; cap ~90s)
+        deadline = start + 90
+        while time.time() < deadline:
+            st = requests.get(f"{FASHN_BASE}/status/{job_id}", headers=headers, timeout=30)
+            st.raise_for_status()
+            body = st.json()
+            status = (body.get("status") or "").lower()
+            if status == "completed":
+                output = body.get("output") or []
+                if not output:
+                    return RenderOutcome(ok=False, error="FASHN completed with no output", engine="fashn")
+                img = requests.get(output[0], timeout=60)
+                img.raise_for_status()
+                return RenderOutcome(ok=True, image_bytes=img.content, engine="fashn", credits=credits)
+            if status in ("failed", "canceled", "cancelled", "error"):
+                return RenderOutcome(ok=False, error=f"FASHN {status}: {body.get('error')}", engine="fashn")
+            time.sleep(2)
+        return RenderOutcome(ok=False, error="FASHN timed out", engine="fashn")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"FASHN render failed: {e}")
+        return RenderOutcome(ok=False, error=str(e)[:300], engine="fashn")
+
+
+def current_engine() -> str:
+    eng = (os.environ.get("TRYON_ENGINE") or "").lower()
+    if eng in ("fashn", "fashn-max", "tryon-max"):
+        return "fashn"
+    if eng == "mock":
+        return "mock"
+    # auto: use FASHN when a key is present, else mock
+    return "fashn" if FASHN_API_KEY else "mock"
+

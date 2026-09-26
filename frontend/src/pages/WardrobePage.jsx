@@ -101,7 +101,7 @@ export default function WardrobePage() {
       const r = await api.get(`/files/${fileId}`, { responseType: "blob" });
       const file = new File([r.data], "atelier-pixel-avatar.png", { type: "image/png" });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: "My AtelierAI pixel avatar" });
+        await navigator.share({ files: [file], title: "My AI Try-on PH avatar" });
       } else {
         downloadAvatar(fileId);
       }

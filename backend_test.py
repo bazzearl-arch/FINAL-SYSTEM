@@ -1,393 +1,605 @@
 #!/usr/bin/env python3
 """
-Backend test for AI Try-on PH - Favorite endpoint with AI pixel generation
-Tests the new feature: POST /api/tryon/sessions/{id}/favorite
+Backend test for mandatory Two-Factor Authentication (TOTP) auth flow.
+Tests all auth scenarios including setup, enable, verify, and security checks.
 """
+
 import requests
+import pyotp
 import time
-import base64
-import io
-from PIL import Image
+import random
+import string
 
-# Base URL from frontend/.env
-BASE_URL = "https://api-keys-ready-1.preview.emergentagent.com/api"
+# Base URL from frontend/.env (HTTPS for Secure cookies)
+BASE_URL = "https://95da7c6a-e319-4706-b84a-0ec58998c152.preview.emergentagent.com/api"
 
-# Admin credentials from test_credentials.md
+# Admin credentials (2FA has been reset, so it will be in SETUP mode)
 ADMIN_EMAIL = "admin@gmail.com"
 ADMIN_PASSWORD = "adminpass"
 
-# Test results
-results = []
+# Test results tracking
+test_results = []
 
-def log(msg, status="INFO"):
-    """Log test results"""
-    print(f"[{status}] {msg}")
-    results.append({"status": status, "message": msg})
+def log_test(scenario, passed, details=""):
+    """Log test result"""
+    status = "✅ PASS" if passed else "❌ FAIL"
+    test_results.append({
+        "scenario": scenario,
+        "passed": passed,
+        "details": details
+    })
+    print(f"{status}: {scenario}")
+    if details:
+        print(f"  Details: {details}")
 
-def create_small_base64_image(color=(255, 200, 150)):
-    """Create a small base64 PNG data URL for testing"""
-    img = Image.new('RGB', (200, 300), color=color)
-    buf = io.BytesIO()
-    img.save(buf, format='PNG')
-    b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
-    return f"data:image/png;base64,{b64}"
+def generate_random_email():
+    """Generate a random email for testing"""
+    random_str = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
+    return f"test_{random_str}@example.com"
 
-def test_favorite_endpoint():
-    """Main test function"""
-    session = requests.Session()
-    
-    # Step 1: Login as admin
-    log("=" * 80)
-    log("STEP 1: Login as admin")
-    log("=" * 80)
-    
-    login_resp = session.post(
-        f"{BASE_URL}/auth/login",
-        json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
-        timeout=15
-    )
-    
-    if login_resp.status_code != 200:
-        log(f"Login failed: {login_resp.status_code} {login_resp.text[:200]}", "FAIL")
-        return False
-    
-    user_data = login_resp.json()
-    log(f"✓ Login successful: {user_data.get('email')} (role: {user_data.get('role')})", "PASS")
-    
-    # Step 2: Get a product_id
-    log("\n" + "=" * 80)
-    log("STEP 2: Get product_id for try-on")
-    log("=" * 80)
-    
-    products_resp = session.get(f"{BASE_URL}/products?gender=men&limit=5", timeout=15)
-    if products_resp.status_code != 200:
-        log(f"Failed to get products: {products_resp.status_code}", "FAIL")
-        return False
-    
-    products = products_resp.json()
-    if not products:
-        log("No products found", "FAIL")
-        return False
-    
-    product_id = products[0]["id"]
-    product_name = products[0]["name"]
-    log(f"✓ Selected product: {product_name} (ID: {product_id})", "PASS")
-    
-    # Step 3: Create multiview try-on session
-    log("\n" + "=" * 80)
-    log("STEP 3: Create multiview try-on session")
-    log("=" * 80)
-    
-    # Create 4 small base64 images with different colors
-    photos = {
-        "front": create_small_base64_image((255, 200, 150)),
-        "left": create_small_base64_image((200, 255, 150)),
-        "right": create_small_base64_image((150, 200, 255)),
-        "rear": create_small_base64_image((255, 150, 200))
-    }
-    
-    tryon_payload = {
-        "gender": "men",
-        "photos": photos,
-        "product_ids": [product_id]
-    }
-    
-    log("Creating multiview session...")
-    tryon_resp = session.post(
-        f"{BASE_URL}/tryon/multiview",
-        json=tryon_payload,
-        timeout=30
-    )
-    
-    if tryon_resp.status_code != 200:
-        log(f"Failed to create try-on session: {tryon_resp.status_code} {tryon_resp.text[:500]}", "FAIL")
-        return False
-    
-    session_data = tryon_resp.json()
-    session_id = session_data["id"]
-    log(f"✓ Try-on session created: {session_id}", "PASS")
-    log(f"  Initial status: {session_data.get('status')}")
-    
-    # Step 4: Poll until COMPLETED
-    log("\n" + "=" * 80)
-    log("STEP 4: Poll session until COMPLETED")
-    log("=" * 80)
-    
-    max_polls = 60  # 4 minutes max (4s per poll)
-    poll_count = 0
-    start_time = time.time()
-    
-    while poll_count < max_polls:
-        poll_count += 1
-        time.sleep(4)
-        
-        poll_resp = session.get(f"{BASE_URL}/tryon/sessions/{session_id}", timeout=15)
-        if poll_resp.status_code != 200:
-            log(f"Poll failed: {poll_resp.status_code}", "FAIL")
-            return False
-        
-        session_data = poll_resp.json()
-        status = session_data.get("status")
-        
-        if status == "COMPLETED":
-            elapsed = time.time() - start_time
-            log(f"✓ Session COMPLETED after {poll_count} polls ({elapsed:.1f}s)", "PASS")
-            
-            # Verify views exist
-            views = session_data.get("views", {})
-            log(f"  Views available: {list(views.keys())}")
-            
-            has_front = views.get("front", {}).get("file_id")
-            if has_front:
-                log(f"  ✓ Front view file_id: {has_front}", "PASS")
-            else:
-                log("  ✗ No front view file_id found", "WARN")
-            
-            break
-        elif status == "FAILED":
-            log(f"Session FAILED: {session_data.get('error')}", "FAIL")
-            return False
-        else:
-            if poll_count % 5 == 0:
-                log(f"  Poll {poll_count}: status={status}")
-    
-    if session_data.get("status") != "COMPLETED":
-        log(f"Session did not complete in time (status: {session_data.get('status')})", "FAIL")
-        return False
-    
-    # Step 5: POST /favorite (with long timeout for AI generation)
-    log("\n" + "=" * 80)
-    log("STEP 5: POST /favorite (AI pixel generation - may take up to 60s)")
-    log("=" * 80)
-    
-    log("Calling /favorite endpoint with 120s timeout...")
-    fav_start = time.time()
-    
+def test_scenario_1_wrong_password():
+    """Test 1: POST /api/auth/login with wrong password -> expect 401"""
+    print("\n=== Test 1: Login with wrong password ===")
     try:
-        fav_resp = session.post(
-            f"{BASE_URL}/tryon/sessions/{session_id}/favorite",
-            timeout=120  # Long timeout for AI generation
+        response = requests.post(
+            f"{BASE_URL}/auth/login",
+            json={"email": ADMIN_EMAIL, "password": "wrongpassword"},
+            timeout=10
         )
-    except requests.Timeout:
-        log("Favorite endpoint timed out after 120s", "FAIL")
+        
+        if response.status_code == 401:
+            log_test("Scenario 1: Wrong password returns 401", True)
+            return True
+        else:
+            log_test("Scenario 1: Wrong password returns 401", False, 
+                    f"Expected 401, got {response.status_code}")
+            return False
+    except Exception as e:
+        log_test("Scenario 1: Wrong password returns 401", False, str(e))
         return False
-    
-    fav_elapsed = time.time() - fav_start
-    log(f"Favorite call completed in {fav_elapsed:.1f}s")
-    
-    if fav_resp.status_code != 200:
-        log(f"Favorite failed: {fav_resp.status_code} {fav_resp.text[:500]}", "FAIL")
+
+def test_scenario_2_login_setup_mode():
+    """Test 2: POST /api/auth/login with correct creds -> {requires_2fa_setup: true, mfa_token, email}
+    Assert NO auth cookies are set at this step and NO full user object with role is returned."""
+    print("\n=== Test 2: Login with correct password (setup mode) ===")
+    try:
+        response = requests.post(
+            f"{BASE_URL}/auth/login",
+            json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            log_test("Scenario 2: Login returns 200 with requires_2fa_setup", False,
+                    f"Expected 200, got {response.status_code}: {response.text}")
+            return None
+        
+        data = response.json()
+        
+        # Check response structure
+        checks = []
+        checks.append(("requires_2fa_setup is True", data.get("requires_2fa_setup") == True))
+        checks.append(("mfa_token present", "mfa_token" in data and data["mfa_token"]))
+        checks.append(("email present", data.get("email") == ADMIN_EMAIL))
+        checks.append(("NO role in response", "role" not in data))
+        checks.append(("NO id in response", "id" not in data))
+        
+        # Check NO auth cookies are set
+        cookies = response.cookies
+        checks.append(("NO access_token cookie", "access_token" not in cookies))
+        checks.append(("NO refresh_token cookie", "refresh_token" not in cookies))
+        
+        all_passed = all(check[1] for check in checks)
+        failed_checks = [check[0] for check in checks if not check[1]]
+        
+        if all_passed:
+            log_test("Scenario 2: Login returns requires_2fa_setup with mfa_token, no cookies", True)
+            return data["mfa_token"]
+        else:
+            log_test("Scenario 2: Login returns requires_2fa_setup with mfa_token, no cookies", False,
+                    f"Failed checks: {', '.join(failed_checks)}")
+            return None
+    except Exception as e:
+        log_test("Scenario 2: Login returns requires_2fa_setup with mfa_token, no cookies", False, str(e))
+        return None
+
+def test_scenario_3_setup_endpoint(mfa_token):
+    """Test 3: POST /api/auth/2fa/setup {mfa_token} -> {secret, otpauth_uri, qr, issuer, account}
+    Assert qr starts with "data:image/png"."""
+    print("\n=== Test 3: 2FA Setup endpoint ===")
+    try:
+        response = requests.post(
+            f"{BASE_URL}/auth/2fa/setup",
+            json={"mfa_token": mfa_token},
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            log_test("Scenario 3: 2FA setup returns secret and QR", False,
+                    f"Expected 200, got {response.status_code}: {response.text}")
+            return None
+        
+        data = response.json()
+        
+        # Check response structure
+        checks = []
+        checks.append(("secret present", "secret" in data and data["secret"]))
+        checks.append(("otpauth_uri present", "otpauth_uri" in data and data["otpauth_uri"]))
+        checks.append(("qr present", "qr" in data and data["qr"]))
+        checks.append(("qr starts with data:image/png", data.get("qr", "").startswith("data:image/png;base64,")))
+        checks.append(("issuer present", data.get("issuer") == "AI Try-on PH"))
+        checks.append(("account present", data.get("account") == ADMIN_EMAIL))
+        
+        all_passed = all(check[1] for check in checks)
+        failed_checks = [check[0] for check in checks if not check[1]]
+        
+        if all_passed:
+            log_test("Scenario 3: 2FA setup returns secret and QR", True)
+            return data["secret"]
+        else:
+            log_test("Scenario 3: 2FA setup returns secret and QR", False,
+                    f"Failed checks: {', '.join(failed_checks)}")
+            return None
+    except Exception as e:
+        log_test("Scenario 3: 2FA setup returns secret and QR", False, str(e))
+        return None
+
+def test_scenario_4_enable_with_code(mfa_token, secret):
+    """Test 4: Compute code = pyotp.TOTP(secret).now(). POST /api/auth/2fa/enable {mfa_token, code}
+    -> expect 200, sets access_token/refresh_token cookies, returns the user object.
+    Assert the returned user has email=admin@gmail.com and role=admin and does NOT contain
+    "password_hash" or "totp_secret"."""
+    print("\n=== Test 4: Enable 2FA with TOTP code ===")
+    try:
+        # Compute TOTP code
+        totp = pyotp.TOTP(secret)
+        code = totp.now()
+        print(f"  Generated TOTP code: {code}")
+        
+        # Create a session to track cookies
+        session = requests.Session()
+        response = session.post(
+            f"{BASE_URL}/auth/2fa/enable",
+            json={"mfa_token": mfa_token, "code": code},
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            log_test("Scenario 4: Enable 2FA returns session and user object", False,
+                    f"Expected 200, got {response.status_code}: {response.text}")
+            return None
+        
+        data = response.json()
+        
+        # Check response structure
+        checks = []
+        checks.append(("email is admin@gmail.com", data.get("email") == ADMIN_EMAIL))
+        checks.append(("role is admin", data.get("role") == "admin"))
+        checks.append(("NO password_hash in response", "password_hash" not in data))
+        checks.append(("NO totp_secret in response", "totp_secret" not in data))
+        checks.append(("id present", "id" in data))
+        
+        # Check cookies are set
+        cookies = session.cookies
+        checks.append(("access_token cookie set", "access_token" in cookies))
+        checks.append(("refresh_token cookie set", "refresh_token" in cookies))
+        
+        all_passed = all(check[1] for check in checks)
+        failed_checks = [check[0] for check in checks if not check[1]]
+        
+        if all_passed:
+            log_test("Scenario 4: Enable 2FA returns session and user object", True)
+            return session
+        else:
+            log_test("Scenario 4: Enable 2FA returns session and user object", False,
+                    f"Failed checks: {', '.join(failed_checks)}")
+            return None
+    except Exception as e:
+        log_test("Scenario 4: Enable 2FA returns session and user object", False, str(e))
+        return None
+
+def test_scenario_5_auth_me(session):
+    """Test 5: With the issued cookies, GET /api/auth/me -> expect 200 returning admin user."""
+    print("\n=== Test 5: GET /auth/me with cookies ===")
+    try:
+        response = session.get(f"{BASE_URL}/auth/me", timeout=10)
+        
+        if response.status_code != 200:
+            log_test("Scenario 5: GET /auth/me returns 200 with user", False,
+                    f"Expected 200, got {response.status_code}: {response.text}")
+            return False
+        
+        data = response.json()
+        
+        # Check response structure
+        checks = []
+        checks.append(("email is admin@gmail.com", data.get("email") == ADMIN_EMAIL))
+        checks.append(("role is admin", data.get("role") == "admin"))
+        checks.append(("NO password_hash in response", "password_hash" not in data))
+        checks.append(("NO totp_secret in response", "totp_secret" not in data))
+        
+        all_passed = all(check[1] for check in checks)
+        failed_checks = [check[0] for check in checks if not check[1]]
+        
+        if all_passed:
+            log_test("Scenario 5: GET /auth/me returns 200 with user", True)
+            return True
+        else:
+            log_test("Scenario 5: GET /auth/me returns 200 with user", False,
+                    f"Failed checks: {', '.join(failed_checks)}")
+            return False
+    except Exception as e:
+        log_test("Scenario 5: GET /auth/me returns 200 with user", False, str(e))
         return False
-    
-    fav_data = fav_resp.json()
-    log(f"✓ Favorite endpoint returned 200", "PASS")
-    
-    # Verify response fields
-    log("\nVerifying response fields:")
-    
-    is_favorite = fav_data.get("is_favorite")
-    log(f"  is_favorite: {is_favorite}")
-    if is_favorite is True:
-        log(f"  ✓ is_favorite=true", "PASS")
-    else:
-        log(f"  ✗ is_favorite={is_favorite} (expected true)", "FAIL")
-    
-    auto_pixel_created = fav_data.get("auto_pixel_created")
-    log(f"  auto_pixel_created: {auto_pixel_created}")
-    if auto_pixel_created is True:
-        log(f"  ✓ auto_pixel_created=true (first time)", "PASS")
-    else:
-        log(f"  ✗ auto_pixel_created={auto_pixel_created} (expected true on first call)", "FAIL")
-    
-    pixel_file_id = fav_data.get("pixel_file_id")
-    log(f"  pixel_file_id: {pixel_file_id}")
-    if pixel_file_id and isinstance(pixel_file_id, str) and len(pixel_file_id) > 0:
-        log(f"  ✓ pixel_file_id is non-empty string", "PASS")
-    else:
-        log(f"  ✗ pixel_file_id is empty or missing", "FAIL")
-    
-    pixel_is_ai = fav_data.get("pixel_is_ai")
-    log(f"  pixel_is_ai: {pixel_is_ai}")
-    if pixel_is_ai is True:
-        log(f"  ✓ pixel_is_ai=true (AI generation succeeded)", "PASS")
-    elif pixel_is_ai is False:
-        log(f"  ⚠ pixel_is_ai=false (fell back to local pixelator)", "WARN")
-    else:
-        log(f"  ✗ pixel_is_ai={pixel_is_ai} (expected boolean)", "FAIL")
-    
-    # Step 6: GET /files/{pixel_file_id}
-    log("\n" + "=" * 80)
-    log("STEP 6: Verify pixel image file")
-    log("=" * 80)
-    
-    if pixel_file_id:
-        file_resp = session.get(f"{BASE_URL}/files/{pixel_file_id}", timeout=15)
+
+def test_scenario_6_wrong_code():
+    """Test 6: POST /api/auth/2fa/enable again with a wrong/short code using a fresh mfa_token -> expect 401."""
+    print("\n=== Test 6: Enable 2FA with wrong code ===")
+    try:
+        # First, get a fresh mfa_token by logging in again
+        response = requests.post(
+            f"{BASE_URL}/auth/login",
+            json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
+            timeout=10
+        )
         
-        if file_resp.status_code != 200:
-            log(f"Failed to get pixel file: {file_resp.status_code}", "FAIL")
+        if response.status_code != 200:
+            log_test("Scenario 6: Wrong code returns 401", False,
+                    f"Failed to get mfa_token: {response.status_code}")
+            return False
+        
+        data = response.json()
+        # Now admin should be in verify mode (already enrolled)
+        if not data.get("requires_2fa"):
+            log_test("Scenario 6: Wrong code returns 401", False,
+                    "Expected requires_2fa=true after admin enrollment")
+            return False
+        
+        mfa_token = data["mfa_token"]
+        
+        # Try with wrong code
+        response = requests.post(
+            f"{BASE_URL}/auth/2fa/verify",  # Use verify endpoint for enrolled users
+            json={"mfa_token": mfa_token, "code": "000000"},
+            timeout=10
+        )
+        
+        if response.status_code == 401:
+            log_test("Scenario 6: Wrong code returns 401", True)
+            return True
         else:
-            content_type = file_resp.headers.get("content-type", "")
-            content_length = len(file_resp.content)
-            
-            log(f"✓ GET /files/{pixel_file_id} returned 200", "PASS")
-            log(f"  Content-Type: {content_type}")
-            log(f"  Content-Length: {content_length} bytes")
-            
-            if "image/png" in content_type:
-                log(f"  ✓ Content-Type is image/png", "PASS")
-            else:
-                log(f"  ✗ Content-Type is not image/png", "FAIL")
-            
-            if content_length > 1024:  # >1KB
-                log(f"  ✓ Image size > 1KB (real image)", "PASS")
-            else:
-                log(f"  ✗ Image size <= 1KB (may be empty)", "FAIL")
-    else:
-        log("Skipping file verification (no pixel_file_id)", "WARN")
-    
-    # Step 7: Idempotency test - POST /favorite again
-    log("\n" + "=" * 80)
-    log("STEP 7: Idempotency test - POST /favorite again")
-    log("=" * 80)
-    
-    log("Calling /favorite endpoint again...")
-    fav2_resp = session.post(
-        f"{BASE_URL}/tryon/sessions/{session_id}/favorite",
-        timeout=30  # Should be fast (no regeneration)
-    )
-    
-    if fav2_resp.status_code != 200:
-        log(f"Second favorite call failed: {fav2_resp.status_code}", "FAIL")
-    else:
-        fav2_data = fav2_resp.json()
-        log(f"✓ Second favorite call returned 200", "PASS")
+            log_test("Scenario 6: Wrong code returns 401", False,
+                    f"Expected 401, got {response.status_code}")
+            return False
+    except Exception as e:
+        log_test("Scenario 6: Wrong code returns 401", False, str(e))
+        return False
+
+def test_scenario_7_register_fresh_user():
+    """Test 7: Register a fresh user: POST /api/auth/register {email: unique, name, password}
+    -> expect 200 with {requires_2fa_setup: true, mfa_token}.
+    Then complete setup -> enable with pyotp code -> expect session issued and GET /api/auth/me
+    returns that user with role=user."""
+    print("\n=== Test 7: Register fresh user and complete 2FA setup ===")
+    try:
+        # Generate unique email
+        email = generate_random_email()
+        name = "Test User"
+        password = "testpass123"
         
-        auto_pixel_created_2 = fav2_data.get("auto_pixel_created")
-        log(f"  auto_pixel_created: {auto_pixel_created_2}")
+        # Register
+        response = requests.post(
+            f"{BASE_URL}/auth/register",
+            json={"email": email, "name": name, "password": password},
+            timeout=10
+        )
         
-        if auto_pixel_created_2 is False:
-            log(f"  ✓ auto_pixel_created=false (no regeneration)", "PASS")
+        if response.status_code != 200:
+            log_test("Scenario 7: Register and complete 2FA setup", False,
+                    f"Register failed: {response.status_code}: {response.text}")
+            return None
+        
+        data = response.json()
+        
+        if not data.get("requires_2fa_setup") or not data.get("mfa_token"):
+            log_test("Scenario 7: Register and complete 2FA setup", False,
+                    "Register didn't return requires_2fa_setup and mfa_token")
+            return None
+        
+        mfa_token = data["mfa_token"]
+        
+        # Setup 2FA
+        response = requests.post(
+            f"{BASE_URL}/auth/2fa/setup",
+            json={"mfa_token": mfa_token},
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            log_test("Scenario 7: Register and complete 2FA setup", False,
+                    f"2FA setup failed: {response.status_code}")
+            return None
+        
+        secret = response.json()["secret"]
+        
+        # Enable 2FA with code
+        totp = pyotp.TOTP(secret)
+        code = totp.now()
+        
+        session = requests.Session()
+        response = session.post(
+            f"{BASE_URL}/auth/2fa/enable",
+            json={"mfa_token": mfa_token, "code": code},
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            log_test("Scenario 7: Register and complete 2FA setup", False,
+                    f"Enable 2FA failed: {response.status_code}: {response.text}")
+            return None
+        
+        user_data = response.json()
+        
+        # Verify session with /auth/me
+        response = session.get(f"{BASE_URL}/auth/me", timeout=10)
+        
+        if response.status_code != 200:
+            log_test("Scenario 7: Register and complete 2FA setup", False,
+                    f"GET /auth/me failed: {response.status_code}")
+            return None
+        
+        me_data = response.json()
+        
+        # Check user data
+        checks = []
+        checks.append(("email matches", me_data.get("email") == email))
+        checks.append(("role is user", me_data.get("role") == "user"))
+        checks.append(("NO password_hash", "password_hash" not in me_data))
+        checks.append(("NO totp_secret", "totp_secret" not in me_data))
+        
+        all_passed = all(check[1] for check in checks)
+        failed_checks = [check[0] for check in checks if not check[1]]
+        
+        if all_passed:
+            log_test("Scenario 7: Register and complete 2FA setup", True)
+            return {"email": email, "password": password, "secret": secret}
         else:
-            log(f"  ✗ auto_pixel_created={auto_pixel_created_2} (expected false, should not regenerate)", "FAIL")
+            log_test("Scenario 7: Register and complete 2FA setup", False,
+                    f"Failed checks: {', '.join(failed_checks)}")
+            return None
+    except Exception as e:
+        log_test("Scenario 7: Register and complete 2FA setup", False, str(e))
+        return None
+
+def test_scenario_8_relogin_enrolled_user(user_info):
+    """Test 8: Re-login the fresh user (now enrolled): POST /api/auth/login
+    -> expect {requires_2fa: true, mfa_token} (verify mode, NOT setup).
+    Then POST /api/auth/2fa/verify {mfa_token, code} with pyotp code -> expect 200 + session."""
+    print("\n=== Test 8: Re-login enrolled user (verify mode) ===")
+    try:
+        if not user_info:
+            log_test("Scenario 8: Re-login enrolled user", False, "No user info from scenario 7")
+            return False
         
-        pixel_file_id_2 = fav2_data.get("pixel_file_id")
-        if pixel_file_id_2 == pixel_file_id:
-            log(f"  ✓ pixel_file_id unchanged: {pixel_file_id_2}", "PASS")
+        email = user_info["email"]
+        password = user_info["password"]
+        secret = user_info["secret"]
+        
+        # Login
+        response = requests.post(
+            f"{BASE_URL}/auth/login",
+            json={"email": email, "password": password},
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            log_test("Scenario 8: Re-login enrolled user", False,
+                    f"Login failed: {response.status_code}: {response.text}")
+            return False
+        
+        data = response.json()
+        
+        # Check for verify mode (NOT setup)
+        checks = []
+        checks.append(("requires_2fa is True", data.get("requires_2fa") == True))
+        checks.append(("NOT requires_2fa_setup", "requires_2fa_setup" not in data or not data.get("requires_2fa_setup")))
+        checks.append(("mfa_token present", "mfa_token" in data))
+        
+        if not all(check[1] for check in checks):
+            failed_checks = [check[0] for check in checks if not check[1]]
+            log_test("Scenario 8: Re-login enrolled user", False,
+                    f"Login response incorrect: {', '.join(failed_checks)}")
+            return False
+        
+        mfa_token = data["mfa_token"]
+        
+        # Verify with TOTP code
+        totp = pyotp.TOTP(secret)
+        code = totp.now()
+        
+        session = requests.Session()
+        response = session.post(
+            f"{BASE_URL}/auth/2fa/verify",
+            json={"mfa_token": mfa_token, "code": code},
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            log_test("Scenario 8: Re-login enrolled user", False,
+                    f"Verify failed: {response.status_code}: {response.text}")
+            return False
+        
+        user_data = response.json()
+        
+        # Check session is issued
+        checks = []
+        checks.append(("email matches", user_data.get("email") == email))
+        checks.append(("access_token cookie", "access_token" in session.cookies))
+        checks.append(("refresh_token cookie", "refresh_token" in session.cookies))
+        
+        all_passed = all(check[1] for check in checks)
+        failed_checks = [check[0] for check in checks if not check[1]]
+        
+        if all_passed:
+            log_test("Scenario 8: Re-login enrolled user", True)
+            return True
         else:
-            log(f"  ✗ pixel_file_id changed (expected same): {pixel_file_id_2}", "FAIL")
-    
-    # Step 8: POST /unfavorite
-    log("\n" + "=" * 80)
-    log("STEP 8: POST /unfavorite")
-    log("=" * 80)
-    
-    unfav_resp = session.post(
-        f"{BASE_URL}/tryon/sessions/{session_id}/unfavorite",
-        timeout=15
-    )
-    
-    if unfav_resp.status_code != 200:
-        log(f"Unfavorite failed: {unfav_resp.status_code}", "FAIL")
-    else:
-        unfav_data = unfav_resp.json()
-        log(f"✓ Unfavorite endpoint returned 200", "PASS")
+            log_test("Scenario 8: Re-login enrolled user", False,
+                    f"Failed checks: {', '.join(failed_checks)}")
+            return False
+    except Exception as e:
+        log_test("Scenario 8: Re-login enrolled user", False, str(e))
+        return False
+
+def test_scenario_9_mfa_token_security():
+    """Test 9: Security: take an mfa_token and try to use it as a Bearer access token on a
+    protected route (GET /api/auth/me with Authorization: Bearer <mfa_token>) -> expect 401
+    (mfa tokens must not be accepted as access tokens)."""
+    print("\n=== Test 9: Security - mfa_token should not work as access token ===")
+    try:
+        # Get an mfa_token
+        response = requests.post(
+            f"{BASE_URL}/auth/login",
+            json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
+            timeout=10
+        )
         
-        is_favorite_after = unfav_data.get("is_favorite")
-        log(f"  is_favorite: {is_favorite_after}")
+        if response.status_code != 200:
+            log_test("Scenario 9: mfa_token rejected as access token", False,
+                    f"Failed to get mfa_token: {response.status_code}")
+            return False
         
-        if is_favorite_after is False:
-            log(f"  ✓ is_favorite=false", "PASS")
+        mfa_token = response.json().get("mfa_token")
+        
+        if not mfa_token:
+            log_test("Scenario 9: mfa_token rejected as access token", False,
+                    "No mfa_token in login response")
+            return False
+        
+        # Try to use mfa_token as Bearer token on protected route
+        response = requests.get(
+            f"{BASE_URL}/auth/me",
+            headers={"Authorization": f"Bearer {mfa_token}"},
+            timeout=10
+        )
+        
+        if response.status_code == 401:
+            log_test("Scenario 9: mfa_token rejected as access token", True)
+            return True
         else:
-            log(f"  ✗ is_favorite={is_favorite_after} (expected false)", "FAIL")
-    
-    # Step 9: Check GET /api/tryon/favorites
-    log("\n" + "=" * 80)
-    log("STEP 9: Check GET /api/tryon/favorites")
-    log("=" * 80)
-    
-    favorites_resp = session.get(f"{BASE_URL}/tryon/favorites", timeout=15)
-    
-    if favorites_resp.status_code != 200:
-        log(f"Failed to get favorites: {favorites_resp.status_code}", "FAIL")
-    else:
-        favorites = favorites_resp.json()
-        log(f"✓ GET /tryon/favorites returned 200", "PASS")
-        log(f"  Favorites count: {len(favorites)}")
+            log_test("Scenario 9: mfa_token rejected as access token", False,
+                    f"Expected 401, got {response.status_code} (mfa_token was accepted as access token!)")
+            return False
+    except Exception as e:
+        log_test("Scenario 9: mfa_token rejected as access token", False, str(e))
+        return False
+
+def test_scenario_10_logout(session):
+    """Test 10: POST /api/auth/logout with cookies -> 200, then GET /api/auth/me -> 401."""
+    print("\n=== Test 10: Logout clears session ===")
+    try:
+        # Logout
+        response = session.post(f"{BASE_URL}/auth/logout", timeout=10)
         
-        # After unfavorite, our session should NOT be in favorites
-        session_in_favorites = any(f.get("id") == session_id for f in favorites)
-        if not session_in_favorites:
-            log(f"  ✓ Session {session_id} not in favorites (correct after unfavorite)", "PASS")
+        if response.status_code != 200:
+            log_test("Scenario 10: Logout clears session", False,
+                    f"Logout failed: {response.status_code}")
+            return False
+        
+        # Try to access /auth/me after logout
+        response = session.get(f"{BASE_URL}/auth/me", timeout=10)
+        
+        if response.status_code == 401:
+            log_test("Scenario 10: Logout clears session", True)
+            return True
         else:
-            log(f"  ✗ Session {session_id} still in favorites (should be removed)", "FAIL")
+            log_test("Scenario 10: Logout clears session", False,
+                    f"Expected 401 after logout, got {response.status_code}")
+            return False
+    except Exception as e:
+        log_test("Scenario 10: Logout clears session", False, str(e))
+        return False
+
+def main():
+    """Run all test scenarios"""
+    print("=" * 80)
+    print("MANDATORY 2FA (TOTP) AUTH FLOW TESTING")
+    print("=" * 80)
+    print(f"Base URL: {BASE_URL}")
+    print(f"Admin: {ADMIN_EMAIL}")
+    print("=" * 80)
     
-    # Step 10: Check GET /api/pixel-avatars
-    log("\n" + "=" * 80)
-    log("STEP 10: Check GET /api/pixel-avatars")
-    log("=" * 80)
+    # Test 1: Wrong password
+    test_scenario_1_wrong_password()
     
-    pixels_resp = session.get(f"{BASE_URL}/pixel-avatars", timeout=15)
+    # Test 2: Login with correct password (setup mode)
+    mfa_token = test_scenario_2_login_setup_mode()
     
-    if pixels_resp.status_code != 200:
-        log(f"Failed to get pixel avatars: {pixels_resp.status_code}", "FAIL")
-    else:
-        pixels = pixels_resp.json()
-        log(f"✓ GET /pixel-avatars returned 200", "PASS")
-        log(f"  Pixel avatars count: {len(pixels)}")
-        
-        # Find our pixel avatar
-        our_pixel = None
-        for p in pixels:
-            if p.get("session_id") == session_id:
-                our_pixel = p
-                break
-        
-        if our_pixel:
-            log(f"  ✓ Found pixel avatar for session {session_id}", "PASS")
-            log(f"    file_id: {our_pixel.get('file_id')}")
-            log(f"    style: {our_pixel.get('style')}")
-            log(f"    ai_generated: {our_pixel.get('ai_generated')}")
-        else:
-            log(f"  ⚠ No pixel avatar found for session {session_id}", "WARN")
+    if not mfa_token:
+        print("\n❌ Cannot continue without mfa_token from scenario 2")
+        print_summary()
+        return
     
-    return True
+    # Test 3: 2FA Setup
+    secret = test_scenario_3_setup_endpoint(mfa_token)
+    
+    if not secret:
+        print("\n❌ Cannot continue without secret from scenario 3")
+        print_summary()
+        return
+    
+    # Test 4: Enable 2FA with code
+    session = test_scenario_4_enable_with_code(mfa_token, secret)
+    
+    if not session:
+        print("\n❌ Cannot continue without session from scenario 4")
+        print_summary()
+        return
+    
+    # Test 5: GET /auth/me with cookies
+    test_scenario_5_auth_me(session)
+    
+    # Test 6: Wrong code returns 401
+    test_scenario_6_wrong_code()
+    
+    # Test 7: Register fresh user and complete setup
+    user_info = test_scenario_7_register_fresh_user()
+    
+    # Test 8: Re-login enrolled user (verify mode)
+    test_scenario_8_relogin_enrolled_user(user_info)
+    
+    # Test 9: Security - mfa_token should not work as access token
+    test_scenario_9_mfa_token_security()
+    
+    # Test 10: Logout
+    test_scenario_10_logout(session)
+    
+    # Print summary
+    print_summary()
 
 def print_summary():
     """Print test summary"""
-    log("\n" + "=" * 80)
-    log("TEST SUMMARY")
-    log("=" * 80)
+    print("\n" + "=" * 80)
+    print("TEST SUMMARY")
+    print("=" * 80)
     
-    pass_count = sum(1 for r in results if r["status"] == "PASS")
-    fail_count = sum(1 for r in results if r["status"] == "FAIL")
-    warn_count = sum(1 for r in results if r["status"] == "WARN")
+    passed = sum(1 for r in test_results if r["passed"])
+    total = len(test_results)
     
-    log(f"PASS: {pass_count}")
-    log(f"FAIL: {fail_count}")
-    log(f"WARN: {warn_count}")
+    for result in test_results:
+        status = "✅" if result["passed"] else "❌"
+        print(f"{status} {result['scenario']}")
+        if result["details"] and not result["passed"]:
+            print(f"   {result['details']}")
     
-    if fail_count > 0:
-        log("\nFailed checks:")
-        for r in results:
-            if r["status"] == "FAIL":
-                log(f"  - {r['message']}")
+    print("=" * 80)
+    print(f"TOTAL: {passed}/{total} tests passed ({passed*100//total if total > 0 else 0}%)")
+    print("=" * 80)
     
-    if warn_count > 0:
-        log("\nWarnings:")
-        for r in results:
-            if r["status"] == "WARN":
-                log(f"  - {r['message']}")
+    if passed == total:
+        print("✅ ALL TESTS PASSED")
+    else:
+        print(f"❌ {total - passed} TEST(S) FAILED")
 
 if __name__ == "__main__":
-    try:
-        success = test_favorite_endpoint()
-        print_summary()
-        
-        if success and sum(1 for r in results if r["status"] == "FAIL") == 0:
-            log("\n✅ ALL TESTS PASSED", "PASS")
-        else:
-            log("\n❌ SOME TESTS FAILED", "FAIL")
-    except Exception as e:
-        log(f"\n❌ TEST CRASHED: {e}", "FAIL")
-        import traceback
-        traceback.print_exc()
+    main()

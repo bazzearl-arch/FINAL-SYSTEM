@@ -181,6 +181,32 @@ frontend:
           comment: "REGRESSION TEST after CORS config change: Google Sign-In button clicked on /login page. Successfully redirected to accounts.google.com (Google OAuth flow). No CORS errors from AtelierAI app before redirect. Note: CORS error detected on Emergent auth page (auth.emergentagent.com trying to fetch from demobackend.emergentagent.com) - this is external to AtelierAI app and not related to the CORS config change. AtelierAI app's redirect functionality working correctly."
 
 backend:
+  - task: "Mandatory 2FA (TOTP) auth flow"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "NEW MANDATORY 2FA (TOTP). Auth now always requires a TOTP step. Contract: POST /api/auth/login {email,password} with correct creds returns {requires_2fa_setup:true, mfa_token, email} if not yet enrolled OR {requires_2fa:true, mfa_token, email} if enrolled (NO session cookies set here). Wrong password still returns 401. POST /api/auth/register {email,name,password} returns {requires_2fa_setup:true, mfa_token, email} (no session). POST /api/auth/2fa/setup {mfa_token} returns {secret, otpauth_uri, qr(dataURL), issuer, account} and stores the secret (totp_enabled stays false). POST /api/auth/2fa/enable {mfa_token, code} verifies the TOTP code (use pyotp.TOTP(secret).now()), sets totp_enabled=true and issues session cookies + returns user object (password_hash and totp_secret must NOT be present). POST /api/auth/2fa/verify {mfa_token, code} for already-enrolled users issues session. mfa_token is a 10-min JWT (type=mfa) and must NOT work as an access token on protected routes. Invalid/short codes -> 401. TEST with admin@gmail.com/adminpass (admin 2FA was reset so it will be in setup mode). Also register a fresh user and complete the setup->enable flow, then GET /api/auth/me with the issued cookies -> 200. NOTE: cookies are Secure, so use the HTTPS preview base URL for cookie-based calls."
+        - working: true
+          agent: "testing"
+          comment: "MANDATORY 2FA (TOTP) AUTH FLOW TESTING COMPLETED (2026-01-27). ALL 10 TEST SCENARIOS PASSED ✅ (100% success rate). Test results: 1) Wrong password returns 401 ✓. 2) Login with correct password (admin@gmail.com/adminpass) returns {requires_2fa_setup: true, mfa_token, email} with NO auth cookies and NO role/id in response ✓. 3) POST /api/auth/2fa/setup returns {secret, otpauth_uri, qr, issuer='AI Try-on PH', account='admin@gmail.com'} with QR starting with 'data:image/png;base64,' ✓. 4) POST /api/auth/2fa/enable with pyotp-generated code returns 200, sets access_token/refresh_token cookies, returns user object with email=admin@gmail.com, role=admin, NO password_hash, NO totp_secret ✓. 5) GET /api/auth/me with cookies returns 200 with admin user ✓. 6) Wrong code (000000) returns 401 ✓. 7) Fresh user registration returns {requires_2fa_setup: true, mfa_token}, complete setup->enable flow works, GET /api/auth/me returns user with role=user ✓. 8) Re-login enrolled user returns {requires_2fa: true, mfa_token} (verify mode, NOT setup), POST /api/auth/2fa/verify with pyotp code issues session ✓. 9) Security check: mfa_token used as Bearer token on GET /api/auth/me returns 401 (mfa tokens correctly rejected as access tokens) ✓. 10) POST /api/auth/logout returns 200, subsequent GET /api/auth/me returns 401 ✓. All auth flows working correctly. Admin account now has 2FA enabled (will need reset for real user enrollment)."
+  - task: "Pixel avatar via Gemini image-to-image"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/pixel_ai.py, /app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "CHANGED pixel generation to true image-to-image using Gemini gemini-3.1-flash-image-preview (feeds the actual try-on render in). Favorite endpoint contract unchanged. User will test try-on/favorite themselves; do NOT run a real try-on/FASHN render during automated testing."
+
   - task: "Favorite session + AI Everskies pixel-mini generation"
     implemented: true
     working: true
@@ -303,7 +329,9 @@ metadata:
   last_tested: "2026-01-27"
 
 test_plan:
-  current_focus: []
+  current_focus:
+    - "Mandatory 2FA (TOTP) auth flow"
+    - "Auth regression (login/register/google after 2FA)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -389,6 +417,9 @@ frontend_new:
     status_history:
         - working: true
           agent: "testing"
+    - agent: "main"
+      message: "2FA RESCUE + FEATURES. Added mandatory TOTP 2FA across login/register/google. Please backend-test ONLY the new auth flow + auth regression (see 'Mandatory 2FA (TOTP) auth flow' task). Use pyotp to compute codes. Admin (admin@gmail.com/adminpass) 2FA has been reset -> setup mode. Do NOT run any real FASHN try-on or favorite/pixel generation (user will test that themselves). Verify: (1) login wrong password ->401; (2) login correct -> requires_2fa_setup + mfa_token; (3) 2fa/setup -> secret+qr; (4) 2fa/enable with pyotp code -> session + user (no password_hash/totp_secret leaked); (5) /auth/me with cookies ->200; (6) fresh register -> setup flow works end to end; (7) mfa_token rejected on a protected route like /auth/me. Use the HTTPS preview base URL (cookies are Secure)."
+
           comment: "BRANDING VERIFIED. 1) Page title is 'AI Try-on PH' (correct), 2) Navbar shows 'AI Try-on PH' with ' PH' in gold styling (brand-gold class), 3) No 'AtelierAI' found anywhere on the page. All branding requirements met."
   
   - task: "Wardrobe multi-view session image display"
@@ -451,3 +482,5 @@ agent_communication:
 
     - agent: "testing"
       message: "FAVORITE ENDPOINT + AI PIXEL GENERATION TESTING COMPLETED (2026-01-27). ALL 22 CHECKS PASSED ✅ (100% success rate). Tested NEW feature: POST /api/tryon/sessions/{id}/favorite with AI Everskies-style pixel-mini auto-generation. Test flow: 1) Admin login successful. 2) Created multiview try-on session with 4 photos + 1 product. 3) Session completed in 137.9s with all 4 views rendered. 4) POST /favorite completed in 17.9s (AI generation fast, well under 60s limit). Response verified: is_favorite=true, auto_pixel_created=true, pixel_file_id present, pixel_is_ai=true (AI generation succeeded, NOT fallback to local pixelator). 5) GET /files/{pixel_file_id} returned 200 with image/png, size=1.6MB (real AI-generated pixel art). 6) Idempotency test: Second POST /favorite returned auto_pixel_created=false (no regeneration), same pixel_file_id. 7) POST /unfavorite returned is_favorite=false. 8) GET /tryon/favorites and GET /pixel-avatars working correctly. CRITICAL FINDINGS: AI pipeline (gpt-4o vision + gpt-image-1) working with EMERGENT_LLM_KEY. Pixel avatar stored with style='everskies', ai_generated=true. All endpoints returning correct data structures. Feature FULLY OPERATIONAL and ready for production."
+    - agent: "testing"
+      message: "MANDATORY 2FA (TOTP) AUTH FLOW TESTING COMPLETED (2026-01-27). ALL 10 TEST SCENARIOS PASSED ✅ (100% success rate). Comprehensive testing of new mandatory Two-Factor Authentication flow. Test coverage: 1) Wrong password rejection (401) ✓. 2) Login with correct password returns requires_2fa_setup mode with mfa_token, NO session cookies, NO user object with role ✓. 3) 2FA setup endpoint returns secret, otpauth_uri, QR code (data:image/png;base64), issuer, account ✓. 4) Enable 2FA with pyotp-generated code issues session cookies and returns sanitized user object (no password_hash/totp_secret) ✓. 5) Session persistence with cookies ✓. 6) Wrong/invalid code rejection (401) ✓. 7) Fresh user registration + complete 2FA setup flow ✓. 8) Re-login enrolled user enters verify mode (NOT setup), successful verification with pyotp code ✓. 9) Security: mfa_token correctly rejected when used as Bearer access token (401) ✓. 10) Logout clears session ✓. CRITICAL FINDINGS: All auth endpoints working correctly. mfa_token properly scoped (10-min JWT, type=mfa, cannot be used as access token). Session cookies (access_token, refresh_token) only issued after successful TOTP verification. User objects properly sanitized (no sensitive fields leaked). Admin account now has 2FA enabled - will need reset for real user enrollment. Auth flow FULLY OPERATIONAL and ready for production."

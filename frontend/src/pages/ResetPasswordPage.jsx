@@ -4,6 +4,7 @@ import { api, formatApiErrorDetail } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import PasswordInput from "@/components/PasswordInput";
 import { toast } from "sonner";
 
 export default function ResetPasswordPage() {
@@ -44,11 +45,11 @@ export default function ResetPasswordPage() {
         <form onSubmit={submit} className="mt-8 space-y-4">
           <div>
             <Label htmlFor="new-pw">New password</Label>
-            <Input data-testid="reset-password" id="new-pw" type="password" value={password} onChange={(e)=>setPassword(e.target.value)} required minLength={6} autoComplete="new-password" />
+            <PasswordInput data-testid="reset-password" id="new-pw" value={password} onChange={(e)=>setPassword(e.target.value)} required minLength={6} autoComplete="new-password" />
           </div>
           <div>
             <Label htmlFor="confirm-pw">Confirm password</Label>
-            <Input data-testid="reset-confirm" id="confirm-pw" type="password" value={confirm} onChange={(e)=>setConfirm(e.target.value)} required minLength={6} autoComplete="new-password" />
+            <PasswordInput data-testid="reset-confirm" id="confirm-pw" value={confirm} onChange={(e)=>setConfirm(e.target.value)} required minLength={6} autoComplete="new-password" />
           </div>
           <Button data-testid="reset-submit" type="submit" className="w-full rounded-full h-11" disabled={busy || !token}>
             {busy ? "Resetting…" : "Reset password"}

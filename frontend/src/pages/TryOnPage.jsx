@@ -44,6 +44,48 @@ async function fileToBase64(file) {
   });
 }
 
+// Basic client-side validation so obviously-wrong uploads are rejected with a
+// helpful message before we waste a render (type, size, resolution, aspect).
+const ACCEPTED_PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
+function validatePhotoFile(file) {
+  return new Promise((resolve) => {
+    if (!ACCEPTED_PHOTO_TYPES.includes(file.type)) {
+      resolve({ ok: false, error: "Unsupported format — please use a JPG, PNG or WEBP image." });
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      resolve({ ok: false, error: "Image is too large (max 8MB). Try a smaller photo." });
+      return;
+    }
+    if (file.size < 5 * 1024) {
+      resolve({ ok: false, error: "That image looks too small or empty." });
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const w = img.naturalWidth, h = img.naturalHeight;
+      URL.revokeObjectURL(url);
+      if (w < 400 || h < 400) {
+        resolve({ ok: false, error: `Photo resolution is too low (${w}\u00d7${h}px). Use at least 400\u00d7400px.` });
+        return;
+      }
+      const ratio = w / h;
+      if (ratio > 1.5) {
+        resolve({ ok: false, error: "This looks like a wide/landscape photo. Please use an upright full-body or upper-body shot." });
+        return;
+      }
+      if (ratio < 0.4) {
+        resolve({ ok: false, error: "This photo is too narrow. Please use a normal upright portrait." });
+        return;
+      }
+      resolve({ ok: true });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve({ ok: false, error: "That file isn't a valid image." }); };
+    img.src = url;
+  });
+}
+
 const peso = (v, c = "PHP") =>
   v == null ? "" : `${c === "PHP" ? "₱" : c + " "}${Number(v).toLocaleString()}`;
 
@@ -173,7 +215,8 @@ export default function TryOnPage() {
   const onFile = async (slot, e) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (f.size > 8 * 1024 * 1024) { toast.error("Max 8MB"); return; }
+    const v = await validatePhotoFile(f);
+    if (!v.ok) { toast.error(v.error); e.target.value = ""; return; }
     const b64 = await fileToBase64(f);
     setPhotos((p) => ({ ...p, [slot]: b64 }));
     e.target.value = "";

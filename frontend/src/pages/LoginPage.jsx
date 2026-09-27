@@ -4,6 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import PasswordInput from "@/components/PasswordInput";
 import { toast } from "sonner";
 import GoogleSignInButton from "@/components/GoogleSignInButton";
 
@@ -20,13 +21,14 @@ export default function LoginPage() {
     setBusy(true);
     const r = await login(email, password);
     setBusy(false);
-    if (r.ok) {
-      toast.success("Welcome back");
-      const from = loc.state?.from || (r.user.role === "admin" ? "/admin" : "/catalog");
-      nav(from);
-    } else {
-      toast.error(r.error);
+    if (!r.ok) { toast.error(r.error); return; }
+    const from = loc.state?.from;
+    if (r.twofa) {
+      nav("/2fa", { state: { mode: r.twofa, mfa_token: r.mfa_token, email: r.email, from } });
+      return;
     }
+    toast.success("Welcome back");
+    nav(from || (r.user.role === "admin" ? "/admin" : "/catalog"));
   };
 
   return (
@@ -54,7 +56,7 @@ export default function LoginPage() {
           </div>
           <div>
             <Label htmlFor="password">Password</Label>
-            <Input data-testid="login-password" id="password" type="password" value={password} onChange={(e)=>setPassword(e.target.value)} required autoComplete="current-password" />
+            <PasswordInput data-testid="login-password" id="password" value={password} onChange={(e)=>setPassword(e.target.value)} required autoComplete="current-password" />
           </div>
           <Button data-testid="login-submit" type="submit" className="w-full rounded-full h-11" disabled={busy}>
             {busy ? "Signing in…" : "Sign in"}

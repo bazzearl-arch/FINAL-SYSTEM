@@ -29,6 +29,8 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     try {
       const { data } = await api.post("/auth/login", { email, password });
+      if (data.requires_2fa_setup) return { ok: true, twofa: "setup", mfa_token: data.mfa_token, email: data.email };
+      if (data.requires_2fa) return { ok: true, twofa: "verify", mfa_token: data.mfa_token, email: data.email };
       setUser(data);
       return { ok: true, user: data };
     } catch (e) {
@@ -39,6 +41,38 @@ export function AuthProvider({ children }) {
   const register = async (email, password, name) => {
     try {
       const { data } = await api.post("/auth/register", { email, password, name });
+      if (data.requires_2fa_setup) return { ok: true, twofa: "setup", mfa_token: data.mfa_token, email: data.email };
+      if (data.requires_2fa) return { ok: true, twofa: "verify", mfa_token: data.mfa_token, email: data.email };
+      setUser(data);
+      return { ok: true, user: data };
+    } catch (e) {
+      return { ok: false, error: formatApiErrorDetail(e.response?.data?.detail) || e.message };
+    }
+  };
+
+  // --- Two-factor (TOTP) handshake ---
+  const twofaSetup = async (mfaToken) => {
+    try {
+      const { data } = await api.post("/auth/2fa/setup", { mfa_token: mfaToken });
+      return { ok: true, ...data };
+    } catch (e) {
+      return { ok: false, error: formatApiErrorDetail(e.response?.data?.detail) || e.message };
+    }
+  };
+
+  const twofaEnable = async (mfaToken, code) => {
+    try {
+      const { data } = await api.post("/auth/2fa/enable", { mfa_token: mfaToken, code });
+      setUser(data);
+      return { ok: true, user: data };
+    } catch (e) {
+      return { ok: false, error: formatApiErrorDetail(e.response?.data?.detail) || e.message };
+    }
+  };
+
+  const twofaVerify = async (mfaToken, code) => {
+    try {
+      const { data } = await api.post("/auth/2fa/verify", { mfa_token: mfaToken, code });
       setUser(data);
       return { ok: true, user: data };
     } catch (e) {
@@ -52,7 +86,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, checking, login, register, logout, refresh, setUser }}>
+    <AuthContext.Provider value={{ user, checking, login, register, logout, refresh, setUser, twofaSetup, twofaEnable, twofaVerify }}>
       {children}
     </AuthContext.Provider>
   );

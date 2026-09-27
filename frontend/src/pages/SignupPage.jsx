@@ -4,6 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import PasswordInput from "@/components/PasswordInput";
 import { toast } from "sonner";
 import GoogleSignInButton from "@/components/GoogleSignInButton";
 
@@ -19,12 +20,14 @@ export default function SignupPage() {
     setBusy(true);
     const r = await register(email, password, name);
     setBusy(false);
-    if (r.ok) {
-      toast.success("Account created");
-      nav("/profile");
-    } else {
-      toast.error(r.error);
+    if (!r.ok) { toast.error(r.error); return; }
+    if (r.twofa) {
+      toast.success("Account created — set up two-factor to continue");
+      nav("/2fa", { state: { mode: r.twofa, mfa_token: r.mfa_token, email: r.email } });
+      return;
     }
+    toast.success("Account created");
+    nav("/profile");
   };
 
   return (
@@ -54,7 +57,7 @@ export default function SignupPage() {
           </div>
           <div>
             <Label htmlFor="password">Password (min 6)</Label>
-            <Input data-testid="signup-password" id="password" type="password" value={password} onChange={(e)=>setPassword(e.target.value)} required minLength={6} autoComplete="new-password" />
+            <PasswordInput data-testid="signup-password" id="password" value={password} onChange={(e)=>setPassword(e.target.value)} required minLength={6} autoComplete="new-password" />
           </div>
           <Button data-testid="signup-submit" type="submit" className="w-full rounded-full h-11" disabled={busy}>
             {busy ? "Creating…" : "Create account"}

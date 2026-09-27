@@ -99,6 +99,53 @@ def clear_auth_cookies(response: Response) -> None:
     response.delete_cookie("refresh_token", path="/")
 
 
+# -------------------- Two-Factor Auth (TOTP) --------------------
+import pyotp  # noqa: E402
+import qrcode as _qrcode  # noqa: E402
+
+TOTP_ISSUER = "AI Try-on PH"
+
+
+def create_mfa_token(user_id: str) -> str:
+    """Short-lived token issued after a valid password/Google step, exchanged
+    for a full session once the TOTP code is verified. NOT an access token."""
+    payload = {
+        "sub": user_id,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=10),
+        "type": "mfa",
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def decode_mfa_token(token: str) -> str:
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="2FA session expired, please sign in again")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid 2FA session")
+    if payload.get("type") != "mfa":
+        raise HTTPException(status_code=401, detail="Invalid 2FA session")
+    return payload["sub"]
+
+
+def make_totp_qr_data_url(otpauth_uri: str) -> str:
+    """Render an otpauth:// URI to a PNG data URL for the setup screen."""
+    img = _qrcode.make(otpauth_uri)
+    buf = _io.BytesIO()
+    img.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("utf-8")
+
+
+async def _issue_session_for_user(user: dict, response: Response) -> dict:
+    uid = str(user["_id"])
+    access = create_access_token(uid, user["email"], user.get("role", "user"))
+    refresh = create_refresh_token(uid)
+    set_auth_cookies(response, access, refresh)
+    fresh = await db.users.find_one({"_id": user["_id"]})
+    return serialize_doc(fresh)
+
+
 def serialize_doc(doc: dict) -> dict:
     if not doc:
         return doc
@@ -106,6 +153,7 @@ def serialize_doc(doc: dict) -> dict:
     if "_id" in doc:
         doc["id"] = str(doc.pop("_id"))
     doc.pop("password_hash", None)
+    doc.pop("totp_secret", None)
     return doc
 
 
@@ -313,6 +361,15 @@ class GoogleCallbackInput(BaseModel):
     session_id: str
 
 
+class TwoFASetupInput(BaseModel):
+    mfa_token: str
+
+
+class TwoFAVerifyInput(BaseModel):
+    mfa_token: str
+    code: str
+
+
 class PixelAvatarInput(BaseModel):
     session_id: str
     pixel_size: int = 48
@@ -490,14 +547,18 @@ async def register(input: RegisterInput, response: Response):
         "name": input.name,
         "role": "user",
         "profile": {},
+        "totp_enabled": False,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     result = await db.users.insert_one(user_doc)
     uid = str(result.inserted_id)
-    access = create_access_token(uid, email, "user")
-    refresh = create_refresh_token(uid)
-    set_auth_cookies(response, access, refresh)
-    return {"id": uid, "email": email, "name": input.name, "role": "user"}
+    # Mandatory 2FA: do not issue a session yet. Client must set up TOTP.
+    return {
+        "requires_2fa_setup": True,
+        "mfa_token": create_mfa_token(uid),
+        "email": email,
+        "name": input.name,
+    }
 
 
 @api.post("/auth/login")
@@ -507,10 +568,57 @@ async def login(input: LoginInput, response: Response):
     if not user or not verify_password(input.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     uid = str(user["_id"])
-    access = create_access_token(uid, email, user.get("role", "user"))
-    refresh = create_refresh_token(uid)
-    set_auth_cookies(response, access, refresh)
-    return serialize_doc(user)
+    # Mandatory 2FA gate: password is correct, but a TOTP step is always required.
+    if user.get("totp_enabled") and user.get("totp_secret"):
+        return {"requires_2fa": True, "mfa_token": create_mfa_token(uid), "email": email}
+    # Enrolled password is valid but 2FA not yet set up -> force enrollment.
+    return {"requires_2fa_setup": True, "mfa_token": create_mfa_token(uid), "email": email}
+
+
+# -------------------- Two-Factor Auth endpoints --------------------
+@api.post("/auth/2fa/setup")
+async def twofa_setup(input: TwoFASetupInput):
+    """Return a fresh TOTP secret + QR for the authenticator app. Called with the
+    short-lived mfa_token issued by register/login when enrollment is required."""
+    uid = decode_mfa_token(input.mfa_token)
+    user = await db.users.find_one({"_id": ObjectId(uid)})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    secret = pyotp.random_base32()
+    await db.users.update_one({"_id": ObjectId(uid)}, {"$set": {"totp_secret": secret, "totp_enabled": False}})
+    otpauth_uri = pyotp.totp.TOTP(secret).provisioning_uri(name=user["email"], issuer_name=TOTP_ISSUER)
+    return {
+        "secret": secret,
+        "otpauth_uri": otpauth_uri,
+        "qr": make_totp_qr_data_url(otpauth_uri),
+        "issuer": TOTP_ISSUER,
+        "account": user["email"],
+    }
+
+
+@api.post("/auth/2fa/enable")
+async def twofa_enable(input: TwoFAVerifyInput, response: Response):
+    """Confirm the first authenticator code, mark 2FA enabled, and issue a session."""
+    uid = decode_mfa_token(input.mfa_token)
+    user = await db.users.find_one({"_id": ObjectId(uid)})
+    if not user or not user.get("totp_secret"):
+        raise HTTPException(status_code=400, detail="Start 2FA setup first")
+    if not pyotp.TOTP(user["totp_secret"]).verify(str(input.code).strip(), valid_window=1):
+        raise HTTPException(status_code=401, detail="Invalid authentication code")
+    await db.users.update_one({"_id": ObjectId(uid)}, {"$set": {"totp_enabled": True}})
+    return await _issue_session_for_user(user, response)
+
+
+@api.post("/auth/2fa/verify")
+async def twofa_verify(input: TwoFAVerifyInput, response: Response):
+    """Verify an authenticator code for an already-enrolled user, issue a session."""
+    uid = decode_mfa_token(input.mfa_token)
+    user = await db.users.find_one({"_id": ObjectId(uid)})
+    if not user or not user.get("totp_enabled") or not user.get("totp_secret"):
+        raise HTTPException(status_code=400, detail="2FA not set up")
+    if not pyotp.TOTP(user["totp_secret"]).verify(str(input.code).strip(), valid_window=1):
+        raise HTTPException(status_code=401, detail="Invalid authentication code")
+    return await _issue_session_for_user(user, response)
 
 
 @api.post("/auth/logout")
@@ -599,11 +707,11 @@ async def google_callback(input: GoogleCallbackInput, response: Response):
         uid = str(r2.inserted_id)
         role = "user"
 
-    access = create_access_token(uid, email, role)
-    refresh = create_refresh_token(uid)
-    set_auth_cookies(response, access, refresh)
-    user = await db.users.find_one({"_id": ObjectId(uid)})
-    return serialize_doc(user)
+    # Mandatory 2FA gate for Google users too.
+    guser = await db.users.find_one({"_id": ObjectId(uid)})
+    if guser.get("totp_enabled") and guser.get("totp_secret"):
+        return {"requires_2fa": True, "mfa_token": create_mfa_token(uid), "email": email}
+    return {"requires_2fa_setup": True, "mfa_token": create_mfa_token(uid), "email": email}
 
 
 # -------------------- Password Reset --------------------

@@ -11,6 +11,7 @@ import LoginPage from "@/pages/LoginPage";
 import SignupPage from "@/pages/SignupPage";
 import ForgotPasswordPage from "@/pages/ForgotPasswordPage";
 import ResetPasswordPage from "@/pages/ResetPasswordPage";
+import TwoFactorPage from "@/pages/TwoFactorPage";
 import CatalogPage from "@/pages/CatalogPage";
 import ProductDetailPage from "@/pages/ProductDetailPage";
 import TryOnPage from "@/pages/TryOnPage";
@@ -38,6 +39,7 @@ function AppRouter() {
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/2fa" element={<TwoFactorPage />} />
       <Route path="/catalog" element={<CatalogPage />} />
       <Route path="/product/:id" element={<ProductDetailPage />} />
       <Route path="/try-on" element={<ProtectedRoute><TryOnPage /></ProtectedRoute>} />

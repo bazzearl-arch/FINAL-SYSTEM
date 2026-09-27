@@ -27,9 +27,20 @@ export default function AuthCallback() {
     (async () => {
       try {
         const { data } = await api.post("/auth/google/callback", { session_id: sessionId });
-        setUser(data);
         // clear the fragment
         window.history.replaceState({}, document.title, window.location.pathname);
+        if (data.requires_2fa_setup || data.requires_2fa) {
+          navigate("/2fa", {
+            replace: true,
+            state: {
+              mode: data.requires_2fa_setup ? "setup" : "verify",
+              mfa_token: data.mfa_token,
+              email: data.email,
+            },
+          });
+          return;
+        }
+        setUser(data);
         toast.success(`Welcome, ${data.name || data.email}`);
         navigate(data.role === "admin" ? "/admin" : "/catalog", { replace: true, state: { user: data } });
       } catch (e) {

@@ -89,8 +89,23 @@ async def generate_pixel_image(prompt: str, api_key: str) -> bytes:
     return images[0]
 
 
+PIXEL_EDIT_PROMPT = (
+    "Recreate the person in this image as an Everskies-style pixel-art chibi mini "
+    "character (a cute dress-up-game avatar with clean, crisp pixel shading and soft "
+    "outlines). Keep the SAME hairstyle, hair color, facial features and expression, "
+    "and faithfully reproduce every clothing item, its colors and patterns, the "
+    "footwear and any accessories the person is wearing. Draw ONE complete mini "
+    "character, full body, standing front view, centered on a plain solid pure-white "
+    "background. No text, no watermark, no extra characters, no props besides what is worn."
+)
+
+
 async def generate_everskies_pixel(render_bytes: bytes) -> bytes:
     """Full pipeline. Returns PNG bytes of the Everskies-style pixel mini.
+
+    Uses Gemini Nano Banana (gemini-3.1-flash-image-preview) image-to-image editing:
+    the actual try-on render is fed directly to the model so the pixel character
+    faithfully copies the real outfit/hair/accessories (single call).
 
     Raises on any failure so the caller can fall back to the local pixelator.
     """
@@ -98,6 +113,17 @@ async def generate_everskies_pixel(render_bytes: bytes) -> bytes:
     if not api_key:
         raise RuntimeError("EMERGENT_LLM_KEY not configured")
 
-    description = await describe_character(render_bytes, api_key)
-    prompt = f"{STYLE_PROMPT_BASE}\n\nCharacter: {description}"
-    return await generate_pixel_image(prompt, api_key)
+    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+
+    img_b64 = _downscale_for_vision(render_bytes, max_side=768)
+    chat = LlmChat(
+        api_key=api_key,
+        session_id=f"pixel-i2i-{uuid.uuid4().hex[:12]}",
+        system_message="You are a meticulous pixel-art character artist.",
+    ).with_model("gemini", "gemini-3.1-flash-image-preview").with_params(modalities=["image", "text"])
+
+    msg = UserMessage(text=PIXEL_EDIT_PROMPT, file_contents=[ImageContent(image_base64=img_b64)])
+    _text, images = await chat.send_message_multimodal_response(msg)
+    if not images:
+        raise RuntimeError("Gemini returned no image for pixel generation")
+    return base64.b64decode(images[0]["data"])

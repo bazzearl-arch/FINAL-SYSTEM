@@ -17,7 +17,7 @@ from io import BytesIO
 from PIL import Image
 
 # Configuration
-BASE_URL = "https://preview-import.preview.emergentagent.com/api"
+BASE_URL = "https://40e5ab34-2b75-43df-9d8d-4810740d8b98.preview.emergentagent.com/api"
 ADMIN_EMAIL = "admin@gmail.com"
 ADMIN_PASSWORD = "adminpass"
 
@@ -53,6 +53,181 @@ def print_result(test_name, passed, details=""):
     print(f"{status} - {test_name}")
     if details:
         print(f"    {details}")
+
+
+# ============================================================================
+# Test 0: Auth API Endpoints (Login, Register, Logout, Me)
+# ============================================================================
+def test_auth_endpoints():
+    print_section("TEST 0: Auth API Endpoints")
+    
+    results = {
+        "admin_login_success": False,
+        "admin_login_cookies_set": False,
+        "admin_login_user_data": False,
+        "wrong_password_401": False,
+        "register_success": False,
+        "register_cookies_set": False,
+        "register_role_user": False,
+        "me_with_cookie_success": False,
+        "me_without_cookie_401": False,
+        "logout_success": False,
+        "logout_cookies_cleared": False,
+    }
+    
+    # Test 1: POST /api/auth/login with admin@gmail.com/adminpass
+    print("\n--- Test 1: Admin Login ---")
+    admin_session = requests.Session()
+    try:
+        resp = admin_session.post(f"{BASE_URL}/auth/login", json={
+            "email": ADMIN_EMAIL,
+            "password": ADMIN_PASSWORD
+        })
+        print(f"POST /auth/login (admin) -> {resp.status_code}")
+        
+        if resp.status_code == 200:
+            results["admin_login_success"] = True
+            print_result("Admin login returns 200", True)
+            
+            # Check cookies
+            cookies = resp.cookies
+            if "access_token" in cookies and "refresh_token" in cookies:
+                results["admin_login_cookies_set"] = True
+                print_result("Admin login sets cookies (access_token, refresh_token)", True)
+                print(f"    access_token: {cookies['access_token'][:20]}...")
+                print(f"    refresh_token: {cookies['refresh_token'][:20]}...")
+            else:
+                print_result("Admin login sets cookies", False, f"Cookies: {list(cookies.keys())}")
+            
+            # Check user data
+            user_data = resp.json()
+            print(f"    User data: {json.dumps(user_data, indent=2)}")
+            if user_data.get("email") == ADMIN_EMAIL and user_data.get("role") == "admin":
+                results["admin_login_user_data"] = True
+                print_result("Admin login returns correct user data (email, role=admin)", True)
+            else:
+                print_result("Admin login returns correct user data", False, 
+                           f"email={user_data.get('email')}, role={user_data.get('role')}")
+        else:
+            print_result("Admin login returns 200", False, f"Status {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print_result("Admin login", False, str(e))
+    
+    # Test 2: POST /api/auth/login with wrong password
+    print("\n--- Test 2: Login with Wrong Password ---")
+    try:
+        resp = requests.post(f"{BASE_URL}/auth/login", json={
+            "email": ADMIN_EMAIL,
+            "password": "wrongpassword123"
+        })
+        print(f"POST /auth/login (wrong password) -> {resp.status_code}")
+        
+        if resp.status_code in [401, 400]:
+            results["wrong_password_401"] = True
+            print_result("Wrong password returns 401/400", True, f"Status: {resp.status_code}")
+        else:
+            print_result("Wrong password returns 401/400", False, f"Got {resp.status_code}")
+    except Exception as e:
+        print_result("Wrong password returns 401/400", False, str(e))
+    
+    # Test 3: POST /api/auth/register with fresh email
+    print("\n--- Test 3: Register New User ---")
+    register_session = requests.Session()
+    test_email = f"testuser_{int(time.time())}@example.com"
+    test_name = f"Test User {int(time.time())}"
+    test_password = "TestPass123!"
+    
+    try:
+        resp = register_session.post(f"{BASE_URL}/auth/register", json={
+            "email": test_email,
+            "password": test_password,
+            "name": test_name
+        })
+        print(f"POST /auth/register -> {resp.status_code}")
+        
+        if resp.status_code == 200:
+            results["register_success"] = True
+            print_result("Register returns 200", True)
+            
+            # Check cookies
+            cookies = resp.cookies
+            if "access_token" in cookies and "refresh_token" in cookies:
+                results["register_cookies_set"] = True
+                print_result("Register sets cookies (access_token, refresh_token)", True)
+            else:
+                print_result("Register sets cookies", False, f"Cookies: {list(cookies.keys())}")
+            
+            # Check user data
+            user_data = resp.json()
+            print(f"    User data: {json.dumps(user_data, indent=2)}")
+            if user_data.get("email") == test_email and user_data.get("role") == "user":
+                results["register_role_user"] = True
+                print_result("Register returns correct user data (email, role=user)", True)
+            else:
+                print_result("Register returns correct user data", False, 
+                           f"email={user_data.get('email')}, role={user_data.get('role')}")
+        else:
+            print_result("Register returns 200", False, f"Status {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print_result("Register", False, str(e))
+    
+    # Test 4: GET /api/auth/me with cookie
+    print("\n--- Test 4: GET /auth/me with Cookie ---")
+    try:
+        resp = admin_session.get(f"{BASE_URL}/auth/me")
+        print(f"GET /auth/me (with cookie) -> {resp.status_code}")
+        
+        if resp.status_code == 200:
+            results["me_with_cookie_success"] = True
+            user_data = resp.json()
+            print_result("GET /auth/me with cookie returns 200", True)
+            print(f"    User data: {json.dumps(user_data, indent=2)}")
+            if user_data.get("email") == ADMIN_EMAIL:
+                print(f"    ✓ Correct user data (email={user_data.get('email')})")
+        else:
+            print_result("GET /auth/me with cookie returns 200", False, f"Status {resp.status_code}")
+    except Exception as e:
+        print_result("GET /auth/me with cookie", False, str(e))
+    
+    # Test 5: GET /api/auth/me without cookie
+    print("\n--- Test 5: GET /auth/me without Cookie ---")
+    try:
+        resp = requests.get(f"{BASE_URL}/auth/me")  # No session, no cookies
+        print(f"GET /auth/me (without cookie) -> {resp.status_code}")
+        
+        if resp.status_code == 401:
+            results["me_without_cookie_401"] = True
+            print_result("GET /auth/me without cookie returns 401", True)
+        else:
+            print_result("GET /auth/me without cookie returns 401", False, f"Got {resp.status_code}")
+    except Exception as e:
+        print_result("GET /auth/me without cookie", False, str(e))
+    
+    # Test 6: POST /api/auth/logout
+    print("\n--- Test 6: Logout ---")
+    try:
+        resp = admin_session.post(f"{BASE_URL}/auth/logout")
+        print(f"POST /auth/logout -> {resp.status_code}")
+        
+        if resp.status_code == 200:
+            results["logout_success"] = True
+            print_result("Logout returns 200", True)
+            
+            # Check if cookies are cleared (should be empty or have max-age=0)
+            # After logout, try to access /auth/me - should fail
+            resp_me = admin_session.get(f"{BASE_URL}/auth/me")
+            print(f"GET /auth/me (after logout) -> {resp_me.status_code}")
+            if resp_me.status_code == 401:
+                results["logout_cookies_cleared"] = True
+                print_result("Logout clears cookies (GET /auth/me returns 401)", True)
+            else:
+                print_result("Logout clears cookies", False, f"GET /auth/me returned {resp_me.status_code}")
+        else:
+            print_result("Logout returns 200", False, f"Status {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print_result("Logout", False, str(e))
+    
+    return results
 
 
 # ============================================================================
@@ -692,18 +867,21 @@ def test_admin_test_render():
 # ============================================================================
 def main():
     print("\n" + "="*80)
-    print("  AI Try-on PH Backend Testing")
+    print("  AI Try-on PH Backend Testing - AUTH ENDPOINTS ONLY")
     print("  Base URL:", BASE_URL)
     print("="*80)
     
     all_results = {}
     
-    # Run all tests
-    all_results["test1"] = test_gender_category_filtering()
-    all_results["test2"] = test_multiview_tryon()
-    all_results["test3"] = test_admin_settings()
-    all_results["test4"] = test_admin_csv_import()
-    all_results["test5"] = test_admin_test_render()
+    # Run ONLY auth test (as requested in review)
+    all_results["test0_auth"] = test_auth_endpoints()
+    
+    # Uncomment below to run all tests
+    # all_results["test1"] = test_gender_category_filtering()
+    # all_results["test2"] = test_multiview_tryon()
+    # all_results["test3"] = test_admin_settings()
+    # all_results["test4"] = test_admin_csv_import()
+    # all_results["test5"] = test_admin_test_render()
     
     # Summary
     print_section("SUMMARY")

@@ -183,6 +183,15 @@ backend:
         - working: true
           agent: "testing"
           comment: "All auth endpoints working: login/register/logout/me. Do NOT retest unless regression suspected."
+        - working: false
+          agent: "user"
+          comment: "User reported 'logins not working' after fresh import of the app."
+        - working: true
+          agent: "main"
+          comment: "ROOT CAUSE: backend/.env and frontend/.env were missing after import, so backend crashed on startup (KeyError MONGO_URL) and ALL API calls including /api/auth/login failed. FIX: recreated both .env files (MONGO_URL, DB_NAME, JWT_SECRET, ADMIN_EMAIL=admin@gmail.com, ADMIN_PASSWORD=adminpass, CORS_ORIGINS, FRONTEND_URL, FASHN_API_KEY; frontend REACT_APP_BACKEND_URL). Verified via curl: POST /api/auth/login returns 200 + cookies; POST /api/auth/register returns 200. Also verified in browser: admin login redirects to /admin dashboard. Please retest login + register + session persistence to confirm."
+        - working: true
+          agent: "testing"
+          comment: "AUTH ENDPOINTS VERIFICATION COMPLETED (2026-09-27). ALL 11 TESTS PASSED (100% success rate). Test results: 1) POST /api/auth/login with admin@gmail.com/adminpass returned 200 with httpOnly cookies (access_token, refresh_token) and correct user object (email=admin@gmail.com, role=admin). 2) POST /api/auth/login with wrong password returned 401 (proper rejection). 3) POST /api/auth/register with fresh email (testuser_1790498257@example.com) returned 200 with httpOnly cookies and correct user object (role=user). 4) GET /api/auth/me with cookie returned 200 with correct user data (admin@gmail.com). 5) GET /api/auth/me without cookie returned 401 (proper authentication check). 6) POST /api/auth/logout returned 200 and cleared cookies (verified by GET /api/auth/me returning 401 after logout). Login now works end-to-end. Root cause fix (recreating .env files) VERIFIED and WORKING."
 
   - task: "Gender-specific product & category filtering"
     implemented: true
@@ -270,8 +279,7 @@ metadata:
   last_tested: "2025-01-26"
 
 test_plan:
-  current_focus:
-    - "Wardrobe multi-view session image display"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -399,3 +407,7 @@ agent_communication:
       message: "BUG FIX APPLIED (2026-09-26): Added helper function `sessionThumbFileId(s)` to WardrobePage.jsx (lines 10-31) that handles both legacy single-view sessions (result_file_id/photo_file_id) and new multi-view sessions (views.front.file_id, views.left.file_id, etc.). Updated both Favorites tab (line 158) and Try-On History tab (line 251) to use this helper. This ensures multi-view sessions display their front view image instead of grey placeholders. Please verify: 1) Try-On History tab shows real images (not grey placeholders), 2) Images have blob: src and valid dimensions, 3) Network requests to /api/files/ return 200 with image/png >100KB, 4) Favorites tab also works correctly."
     - agent: "testing"
       message: "BUG FIX VERIFICATION COMPLETED (2026-09-26). ALL TESTS PASSED ✅. Tested at https://preview-import.preview.emergentagent.com with admin@gmail.com/adminpass. RESULTS: 1) Try-On History tab: Found 12 session cards, all displaying REAL IMAGES (no grey placeholders). 2) Image verification: Tested 4 sessions - all have <img> elements with blob: src (e.g., 'blob:https://preview-import.preview.emergentagent.com/...') and valid naturalWidth×naturalHeight (848×1264). 3) Network verification: 8 successful /api/files/ requests with status 200, content-type image/png, and Content-Length >100KB (ranging from 220KB to 1.2MB - confirmed real FASHN renders). 4) Favorites tab: After favoriting a session, image loads correctly with blob: src and dimensions 848×1264. 5) /try-on page: Defaults to Step 1 (gender selection) - no stale state. 6) Screenshot captured showing 4 session cards with real AI-rendered images (men's clothing and women's dress). MINOR: 2 console 401 errors from initial load (not critical). ROOT CAUSE FIX VERIFIED: Helper function `sessionThumbFileId(s)` correctly falls back to views.front.file_id for multi-view sessions, resolving the grey placeholder issue. Bug fix WORKING CORRECTLY."
+    - agent: "main"
+      message: "IMPORT RESCUE + LOGIN FIX (fresh env). Both backend/.env and frontend/.env were MISSING after import, causing backend to crash on startup (KeyError MONGO_URL) and every API call (including login) to fail. Recreated both .env files for THIS environment (backend URL https://40e5ab34-2b75-43df-9d8d-4810740d8b98.preview.emergentagent.com), added user's FASHN_API_KEY, installed missing deps (bs4, frontend node_modules), restarted all services. Backend health=200, admin+13 products seeded. Please RETEST Auth API Endpoints only: POST /api/auth/login with admin@gmail.com/adminpass (expect 200 + httpOnly cookies), POST /api/auth/register with a fresh email (expect 200), GET /api/auth/me with the returned cookie (expect 200 user), POST /api/auth/logout. Do not retest other tasks."
+    - agent: "testing"
+      message: "AUTH ENDPOINTS TESTING COMPLETED (2026-09-27). ALL 11 TESTS PASSED ✅ (100% success rate). Verified all 5 requested scenarios: 1) Admin login (admin@gmail.com/adminpass) returns 200 + httpOnly cookies (access_token, refresh_token) + correct user object (email, role=admin). 2) Login with wrong password returns 401. 3) Register new user returns 200 + httpOnly cookies + user object (role=user). 4) GET /auth/me with cookie returns 200 + correct user data. 5) GET /auth/me without cookie returns 401. 6) Logout returns 200 and clears cookies (verified by subsequent /auth/me returning 401). Login now works end-to-end. Root cause fix (missing .env files) VERIFIED. No issues found. Auth API endpoints fully operational."

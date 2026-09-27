@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import PrivateImage from "@/components/PrivateImage";
+import { useTryOn } from "@/context/TryOnContext";
 
 const VIEWS = [
   { key: "front", label: "Front" },
@@ -39,23 +40,27 @@ const peso = (v, c = "PHP") =>
 
 export default function TryOnPage() {
   const [params] = useSearchParams();
-  const [step, setStep] = useState(1); // 1=gender 2=photos 3=products 4=result
-  const [gender, setGender] = useState(null);
-  const [photos, setPhotos] = useState({ front: null, left: null, right: null, rear: null });
+  const {
+    step, setStep,
+    gender, setGender,
+    photos, setPhotos,
+    selected, setSelected,
+    session,
+    status, setStatus,
+    carousel, setCarousel,
+    startGenerate,
+    retry: retryFromContext,
+    reset: resetFromContext,
+  } = useTryOn();
+
   const [categories, setCategories] = useState([]);
   const [activeCat, setActiveCat] = useState(null);
   const [products, setProducts] = useState([]);
-  const [selected, setSelected] = useState([]); // array of product objects (outfit)
-
-  const [session, setSession] = useState(null);
-  const [status, setStatus] = useState("idle"); // idle|processing|completed|failed
-  const [carousel, setCarousel] = useState(0);
 
   // camera
   const [camSlot, setCamSlot] = useState(null);
   const [camError, setCamError] = useState(null);
   const videoRef = useRef(null);
-  const pollRef = useRef(null);
 
   // ---- data loading ----
   useEffect(() => {
@@ -132,58 +137,22 @@ export default function TryOnPage() {
   const isSelected = (id) => selected.some((x) => x.id === id);
   const catProducts = products.filter((p) => p.category === activeCat);
 
-  // ---- generate + poll ----
-  const poll = useCallback((id) => {
-    let tries = 0;
-    pollRef.current = setInterval(async () => {
-      tries += 1;
-      try {
-        const { data } = await api.get(`/tryon/sessions/${id}`);
-        if (data.status !== "processing") {
-          clearInterval(pollRef.current);
-          setSession(data);
-          setStatus(data.status === "COMPLETED" ? "completed" : "failed");
-          setCarousel(0);
-        }
-      } catch {
-        // keep trying
-      }
-      if (tries > 90) { // ~3 min safety
-        clearInterval(pollRef.current);
-        setStatus("failed");
-      }
-    }, 2000);
-  }, []);
-
-  useEffect(() => () => clearInterval(pollRef.current), []);
-
+  // ---- generate + poll (delegated to TryOnContext) ----
   const generate = async () => {
     if (!photosDone) { toast.error("Add all four photos"); setStep(2); return; }
     if (selected.length === 0) { toast.error("Select at least one item"); return; }
-    setStep(4);
-    setStatus("processing");
-    setSession(null);
-    try {
-      const { data } = await api.post("/tryon/multiview", {
-        gender,
-        photos,
-        product_ids: selected.map((p) => p.id),
-      });
-      setSession(data);
-      poll(data.id);
-    } catch (e) {
-      setStatus("failed");
-      toast.error("Could not start the try-on. Please try again.");
+    const res = await startGenerate({
+      gender,
+      photos,
+      product_ids: selected.map((p) => p.id),
+    });
+    if (!res.ok) {
+      toast.error(res.error || "Could not start the try-on. Please try again.");
     }
   };
 
-  const retryGenerate = () => { clearInterval(pollRef.current); generate(); };
-  const restart = () => {
-    clearInterval(pollRef.current);
-    setStep(1); setGender(null);
-    setPhotos({ front: null, left: null, right: null, rear: null });
-    setSelected([]); setSession(null); setStatus("idle");
-  };
+  const retryGenerate = () => { retryFromContext(); };
+  const restart = () => { resetFromContext(); };
 
   // available views (with a rendered file)
   const availViews = session?.views

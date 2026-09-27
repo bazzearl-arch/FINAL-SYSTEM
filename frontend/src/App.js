@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/context/AuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
+import { TryOnProvider } from "@/context/TryOnContext";
 import Navbar from "@/components/Navbar";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import LandingPage from "@/pages/LandingPage";
@@ -61,11 +62,13 @@ function App() {
     <ThemeProvider>
       <BrowserRouter>
         <AuthProvider>
-          <div className="App min-h-screen bg-background text-foreground">
-            <Navbar />
-            <AppRouter />
-            <Toaster position="top-right" richColors />
-          </div>
+          <TryOnProvider>
+            <div className="App min-h-screen bg-background text-foreground">
+              <Navbar />
+              <AppRouter />
+              <Toaster position="top-right" richColors />
+            </div>
+          </TryOnProvider>
         </AuthProvider>
       </BrowserRouter>
     </ThemeProvider>

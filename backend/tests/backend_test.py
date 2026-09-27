@@ -13,7 +13,7 @@ import time
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://branding-engine-1.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://preview-import.preview.emergentagent.com").rstrip("/")
 API = BASE_URL + "/api"
 
 ADMIN_EMAIL = "admin@atelierai.ph"

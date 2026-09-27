@@ -10,7 +10,7 @@ import io
 from PIL import Image
 
 # Base URL from frontend/.env
-BASE_URL = "https://40e5ab34-2b75-43df-9d8d-4810740d8b98.preview.emergentagent.com/api"
+BASE_URL = "https://api-keys-ready-1.preview.emergentagent.com/api"
 
 # Admin credentials from test_credentials.md
 ADMIN_EMAIL = "admin@gmail.com"

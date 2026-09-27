@@ -9,7 +9,7 @@ import time
 import base64
 from io import BytesIO
 
-BASE_URL = "https://preview-import.preview.emergentagent.com"
+BASE_URL = "https://api-keys-ready-1.preview.emergentagent.com"
 FASHN_API_KEY = "fa-dmerXc5HGfHl-uKB3RsUF8H3XkFC72PCG6z7M"
 
 # Test credentials

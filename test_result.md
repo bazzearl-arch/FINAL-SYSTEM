@@ -181,6 +181,21 @@ frontend:
           comment: "REGRESSION TEST after CORS config change: Google Sign-In button clicked on /login page. Successfully redirected to accounts.google.com (Google OAuth flow). No CORS errors from AtelierAI app before redirect. Note: CORS error detected on Emergent auth page (auth.emergentagent.com trying to fetch from demobackend.emergentagent.com) - this is external to AtelierAI app and not related to the CORS config change. AtelierAI app's redirect functionality working correctly."
 
 backend:
+  - task: "Favorite session + AI Everskies pixel-mini generation"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py, /app/backend/pixel_ai.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "NEW FEATURE. POST /api/tryon/sessions/{id}/favorite now: (1) marks session favorite, (2) auto-generates an Everskies-style pixel mini via a two-step AI pipeline in pixel_ai.py — gpt-4o vision describes the FRONT render, then gpt-image-1 (Emergent LLM key) renders the pixel character; falls back to local make_pixel_avatar if AI fails, (3) returns pixel_file_id + pixel_is_ai. Source render now resolved for BOTH multiview (views.front.file_id) and single (result_file_id) sessions. Verified standalone: pixel_ai pipeline produced a 1024x1536 PNG from a synthetic image using the Emergent key; storage put/get round-trip OK. PLEASE TEST: login admin@gmail.com/adminpass, create a completed try-on session (multiview or single), then POST /tryon/sessions/{id}/favorite and verify 200, is_favorite=true, auto_pixel_created=true, pixel_file_id present, and GET /api/files/{pixel_file_id} returns a valid PNG image (>1KB). Report pixel_is_ai value. Also verify calling favorite twice does NOT regenerate (auto_pixel_created=false 2nd time) and POST /unfavorite sets is_favorite=false. NOTE: AI gen can take up to ~60s — use a long timeout."
+        - working: true
+          agent: "testing"
+          comment: "COMPREHENSIVE FAVORITE ENDPOINT TESTING COMPLETED (2026-01-27). ALL 22 CHECKS PASSED ✅ (100% success rate). Test flow: 1) Admin login successful (admin@gmail.com/adminpass). 2) Selected product: Monochrome Oversized Suit Blazer. 3) Created multiview try-on session with 4 photos (front/left/right/rear) + 1 product_id. 4) Session completed in 137.9s (31 polls) with status=COMPLETED. All 4 views have file_ids (front: 6ab8f9aead18c6dedb7ee1e6). 5) POST /favorite completed in 17.9s (well under 60s AI generation time). Response: HTTP 200, is_favorite=true ✓, auto_pixel_created=true ✓, pixel_file_id=6ab8fa32ad18c6dedb7ee1ea ✓, pixel_is_ai=true ✓ (AI generation succeeded, NOT fallback). 6) GET /files/{pixel_file_id} returned 200 with content-type=image/png ✓ and size=1,644,743 bytes (1.6MB, real AI-generated image) ✓. 7) IDEMPOTENCY TEST: Second POST /favorite returned 200 with auto_pixel_created=false ✓ (no regeneration) and same pixel_file_id ✓. 8) POST /unfavorite returned 200 with is_favorite=false ✓. 9) GET /tryon/favorites returned 200 with 1 favorite (test session NOT in list after unfavorite) ✓. 10) GET /pixel-avatars returned 200 with 1 pixel avatar for test session ✓ (file_id matches, style='everskies', ai_generated=true). CRITICAL FINDINGS: AI pipeline (gpt-4o vision + gpt-image-1) working correctly with EMERGENT_LLM_KEY. Pixel generation completed in ~18s (fast). Idempotency working (no duplicate generation). Unfavorite working. All endpoints returning correct data structures. Feature FULLY OPERATIONAL and ready for production."
+
   - task: "Auth API Endpoints"
     implemented: true
     working: true
@@ -282,10 +297,10 @@ backend:
 
 metadata:
   created_by: "main_agent"
-  version: "2.2"
-  test_sequence: 6
+  version: "2.3"
+  test_sequence: 7
   run_ui: true
-  last_tested: "2026-09-27"
+  last_tested: "2026-01-27"
 
 test_plan:
   current_focus: []
@@ -433,3 +448,6 @@ agent_communication:
       message: "LOGIN FIX VERIFICATION COMPLETED ON PREVIEW-IMPORT DOMAIN (2026-09-27). ALL 4 TEST SCENARIOS PASSED ✅. Tested exclusively on https://preview-import.preview.emergentagent.com (the domain that was failing). CRITICAL FINDINGS: 1) NO AxiosError or Network Error detected on login page or during any auth flow. 2) ALL API calls are same-origin (preview-import.preview.emergentagent.com/api/*), ZERO cross-origin calls to 40e5ab34 domain. 3) Admin login: POST /api/auth/login returned 200, redirected to /admin dashboard successfully. 4) Session persistence: GET /api/auth/me returned 200 after reload, user stayed logged in. 5) New user registration: POST /api/auth/register returned 200, user auto-logged in and redirected to /profile. The resolveApiBase() fix in /app/frontend/src/lib/api.js is working perfectly - it detects when window.location.host differs from configured backend host and falls back to relative '/api' URLs, keeping auth cookies first-party. Login now works correctly on ANY Emergent host (preview-import, 40e5ab34, or any other). Bug fix VERIFIED and PRODUCTION-READY."
     - agent: "testing"
       message: "STEP 4 RESULTS CAROUSEL BUG FIX VERIFICATION COMPLETED (2026-09-27). ALL CHECKS PASSED ✅. Tested full try-on flow at https://preview-import.preview.emergentagent.com with admin@gmail.com/adminpass. Test flow: 1) Login successful. 2) Selected gender (Men), uploaded 4 photos (front/left/right/rear). 3) Selected 1 product (Classic White Oxford Shirt). 4) Try-on completed in 75 seconds with FASHN engine. 5) CRITICAL VERIFICATION - Step 4 Results: Main carousel image renders correctly (blob: src, 848×1264, NOT blank/grey). All 4 view thumbnails render correctly (front/left/right/rear, all 848×1264). Clicked through all 4 views - each shows rendered image. 6) Network: 4 distinct file IDs, 13 successful GET /api/files/ requests (200 image/png, 1.3MB-1.5MB each). Screenshot shows real AI-rendered image with all 4 thumbnails visible. ROOT CAUSE FIX VERIFIED: availViews now correctly maps file_id from session.views[v.key].file_id (TryOnPage.jsx lines 157-163), so PrivateImage receives real file_ids instead of undefined. Bug fix WORKING CORRECTLY. Ready for production."
+
+    - agent: "testing"
+      message: "FAVORITE ENDPOINT + AI PIXEL GENERATION TESTING COMPLETED (2026-01-27). ALL 22 CHECKS PASSED ✅ (100% success rate). Tested NEW feature: POST /api/tryon/sessions/{id}/favorite with AI Everskies-style pixel-mini auto-generation. Test flow: 1) Admin login successful. 2) Created multiview try-on session with 4 photos + 1 product. 3) Session completed in 137.9s with all 4 views rendered. 4) POST /favorite completed in 17.9s (AI generation fast, well under 60s limit). Response verified: is_favorite=true, auto_pixel_created=true, pixel_file_id present, pixel_is_ai=true (AI generation succeeded, NOT fallback to local pixelator). 5) GET /files/{pixel_file_id} returned 200 with image/png, size=1.6MB (real AI-generated pixel art). 6) Idempotency test: Second POST /favorite returned auto_pixel_created=false (no regeneration), same pixel_file_id. 7) POST /unfavorite returned is_favorite=false. 8) GET /tryon/favorites and GET /pixel-avatars working correctly. CRITICAL FINDINGS: AI pipeline (gpt-4o vision + gpt-image-1) working with EMERGENT_LLM_KEY. Pixel avatar stored with style='everskies', ai_generated=true. All endpoints returning correct data structures. Feature FULLY OPERATIONAL and ready for production."

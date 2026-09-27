@@ -38,6 +38,7 @@ from product_connectors import (
 )
 from email_service import send_email, password_reset_html
 from pixel_avatar import make_pixel_avatar
+from pixel_ai import generate_everskies_pixel
 
 # -------------------- Config --------------------
 MONGO_URL = os.environ["MONGO_URL"]
@@ -1160,22 +1161,46 @@ async def favorite_session(session_id: str, user: dict = Depends(get_current_use
 
     already_favorite = bool(session.get("is_favorite"))
     pixel_avatar_id = session.get("pixel_avatar_id")
+    pixel_file_id = None
+    pixel_is_ai = False
+
+    # Resolve the FRONT-view render as the pixel source. Handles both single
+    # renders (result_file_id) and multi-view sessions (views.front.file_id).
+    def _front_source(sess):
+        views = sess.get("views") or {}
+        for key in ("front", "left", "right", "rear"):
+            v = views.get(key) or {}
+            if v.get("file_id"):
+                return v["file_id"]
+        return sess.get("result_file_id") or sess.get("photo_file_id")
 
     # Auto-create pixel avatar if not already generated
     if not pixel_avatar_id:
-        source_file_id = session.get("result_file_id") or session.get("photo_file_id")
+        source_file_id = _front_source(session)
         if source_file_id:
             try:
                 src_rec = await db.file_records.find_one({"_id": ObjectId(source_file_id)})
                 if src_rec:
                     src_bytes, _ = storage_client.get_object(src_rec["storage_path"])
-                    png = await asyncio.to_thread(make_pixel_avatar, src_bytes, 40, 384, 3)
+                    # Try AI Everskies-style pixel art first; fall back to the
+                    # local algorithmic pixelator so the flow never fully breaks.
+                    png = None
+                    try:
+                        png = await generate_everskies_pixel(src_bytes)
+                        pixel_is_ai = True
+                    except Exception as ai_err:
+                        logger.warning(f"AI pixel gen failed, using local pixelator: {ai_err}")
+                        png = await asyncio.to_thread(make_pixel_avatar, src_bytes, 40, 384, 3)
+                        pixel_is_ai = False
                     rec = await save_bytes_for_user(user["id"], "pixels", png, "image/png")
+                    pixel_file_id = str(rec["_id"])
                     now = datetime.now(timezone.utc).isoformat()
                     avatar_doc = {
                         "user_id": user["id"],
                         "session_id": session_id,
-                        "file_id": str(rec["_id"]),
+                        "file_id": pixel_file_id,
+                        "style": "everskies" if pixel_is_ai else "pixelate",
+                        "ai_generated": pixel_is_ai,
                         "pixel_size": 40,
                         "posterize_bits": 3,
                         "auto_generated": True,
@@ -1185,6 +1210,15 @@ async def favorite_session(session_id: str, user: dict = Depends(get_current_use
                     pixel_avatar_id = str(r.inserted_id)
             except Exception as e:
                 logger.warning(f"Auto pixel avatar failed: {e}")
+    elif pixel_avatar_id:
+        # Already generated earlier — surface its file_id for display.
+        try:
+            av = await db.pixel_avatars.find_one({"_id": ObjectId(pixel_avatar_id)})
+            if av:
+                pixel_file_id = av.get("file_id")
+                pixel_is_ai = bool(av.get("ai_generated"))
+        except Exception:
+            pass
 
     await db.try_on_sessions.update_one(
         {"_id": ObjectId(session_id)},
@@ -1198,6 +1232,8 @@ async def favorite_session(session_id: str, user: dict = Depends(get_current_use
     return {
         **serialize_doc(updated),
         "auto_pixel_created": bool(pixel_avatar_id) and not already_favorite,
+        "pixel_file_id": pixel_file_id,
+        "pixel_is_ai": pixel_is_ai,
     }
 
 

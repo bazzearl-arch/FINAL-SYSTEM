@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Camera, Upload, Sparkles, AlertTriangle, X, ChevronRight, ChevronLeft,
-  RotateCcw, ExternalLink, Check, RefreshCw, ArrowLeft,
+  RotateCcw, ExternalLink, Check, RefreshCw, ArrowLeft, Heart,
 } from "lucide-react";
 import { toast } from "sonner";
 import PrivateImage from "@/components/PrivateImage";
@@ -17,6 +17,15 @@ const VIEWS = [
   { key: "left", label: "Left side" },
   { key: "right", label: "Right side" },
   { key: "rear", label: "Rear / back" },
+];
+
+// Results carousel order — Front → Left → Back → Right so clicking through
+// reads like the character turning 360°. (Capture order above is unchanged.)
+const CAROUSEL_ORDER = [
+  { key: "front", label: "Front" },
+  { key: "left", label: "Left side" },
+  { key: "rear", label: "Back" },
+  { key: "right", label: "Right side" },
 ];
 
 const PHOTO_TIPS = [
@@ -61,6 +70,48 @@ export default function TryOnPage() {
   const [camSlot, setCamSlot] = useState(null);
   const [camError, setCamError] = useState(null);
   const videoRef = useRef(null);
+
+  // favorites + pixel mini character
+  const [favBusy, setFavBusy] = useState(false);
+  const [isFav, setIsFav] = useState(false);
+  const [pixelFileId, setPixelFileId] = useState(null);
+  const [pixelIsAi, setPixelIsAi] = useState(false);
+
+  // sync favorite/pixel state when the results session changes
+  useEffect(() => {
+    if (!session?.id) { setIsFav(false); setPixelFileId(null); setPixelIsAi(false); return; }
+    setIsFav(!!session.is_favorite);
+    if (session.pixel_avatar_id) {
+      api.get("/pixel-avatars")
+        .then(({ data }) => {
+          const av = (data || []).find((a) => a.session_id === session.id);
+          if (av) { setPixelFileId(av.file_id); setPixelIsAi(!!av.ai_generated); }
+        })
+        .catch(() => {});
+    } else {
+      setPixelFileId(null);
+      setPixelIsAi(false);
+    }
+  }, [session?.id]);
+
+  const onFavorite = async () => {
+    if (!session?.id || favBusy) return;
+    setFavBusy(true);
+    try {
+      const { data } = await api.post(`/tryon/sessions/${session.id}/favorite`);
+      setIsFav(true);
+      if (data.pixel_file_id) { setPixelFileId(data.pixel_file_id); setPixelIsAi(!!data.pixel_is_ai); }
+      if (data.auto_pixel_created) {
+        toast.success(data.pixel_is_ai ? "Favorited · pixel character created" : "Favorited · pixel mini created");
+      } else {
+        toast.success("Added to favorites");
+      }
+    } catch (e) {
+      toast.error("Could not save to favorites. Please try again.");
+    } finally {
+      setFavBusy(false);
+    }
+  };
 
   // ---- data loading ----
   useEffect(() => {
@@ -154,10 +205,11 @@ export default function TryOnPage() {
   const retryGenerate = () => { retryFromContext(); };
   const restart = () => { resetFromContext(); };
 
-  // available views (with a rendered file). Carry the file_id onto each item so
-  // the carousel + thumbnails can actually fetch/display the render.
+  // available views (with a rendered file), ordered Front → Left → Back → Right
+  // for the 360° spin. Carry the file_id onto each item so the carousel +
+  // thumbnails can actually fetch/display the render.
   const availViews = session?.views
-    ? VIEWS
+    ? CAROUSEL_ORDER
         .filter((v) => session.views[v.key]?.file_id)
         .map((v) => ({ ...v, file_id: session.views[v.key].file_id }))
     : [];
@@ -509,6 +561,44 @@ export default function TryOnPage() {
                   );
                 })}
               </div>
+            </div>
+
+            {/* FAVORITES + PIXEL MINI CHARACTER */}
+            <div className="bg-card border border-border rounded-2xl p-5 mt-4" data-testid="favorite-pixel-panel">
+              <Button
+                data-testid="favorite-btn"
+                onClick={onFavorite}
+                disabled={favBusy}
+                variant={isFav && !favBusy ? "secondary" : "default"}
+                className="w-full rounded-full gap-2"
+              >
+                {favBusy ? (
+                  <><RefreshCw size={16} className="animate-spin" /> Creating pixel mini…</>
+                ) : isFav ? (
+                  <><Heart size={16} className="fill-current" /> Favorited</>
+                ) : (
+                  <><Heart size={16} /> Favorites</>
+                )}
+              </Button>
+              {favBusy && (
+                <p className="text-[11px] text-muted-foreground mt-2 text-center">
+                  Turning your look into an Everskies-style pixel mini — this can take up to a minute.
+                </p>
+              )}
+              {pixelFileId && (
+                <div className="mt-4" data-testid="pixel-mini">
+                  <p className="overline-label text-muted-foreground">
+                    Pixel mini {pixelIsAi ? "· AI" : ""}
+                  </p>
+                  <div className="mt-2 w-40 mx-auto aspect-square rounded-xl overflow-hidden bg-white border border-border">
+                    <PrivateImage
+                      fileId={pixelFileId}
+                      alt="Pixel mini character"
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </aside>
         </div>

@@ -282,10 +282,10 @@ backend:
 
 metadata:
   created_by: "main_agent"
-  version: "2.1"
-  test_sequence: 5
+  version: "2.2"
+  test_sequence: 6
   run_ui: true
-  last_tested: "2025-01-26"
+  last_tested: "2026-09-27"
 
 test_plan:
   current_focus: []
@@ -305,6 +305,15 @@ frontend_new:
         - working: "NA"
           agent: "main"
           comment: "Rewrote TryOnPage.jsx. Steps: 1) gender pick, 2) 2x2 photo grid with camera + upload + retake, 3) gender-filtered category tabs + product multi-select, 4) results carousel (front/left/right/rear) with PrivateImage thumbnails + items-used list with exact product_url deep links. Please test end-to-end with admin@gmail.com/adminpass: pick 'Women', use Upload (any small jpg) for all 4 photos, pick 2 items in Tops, click Try On, verify carousel appears with 4 view thumbnails, verify View Product links exist and href is not the platform homepage."
+        - working: false
+          agent: "user"
+          comment: "User (with FASHN engine live): on Step 4 RESULTS, the rendered AI output is NOT displayed in the carousel (blank grey), even though the render succeeded (same render shows correctly when saved to Wardrobe > Favorites)."
+        - working: true
+          agent: "main"
+          comment: "ROOT CAUSE FOUND: availViews was built as VIEWS.filter(v => session.views[v.key]?.file_id). VIEWS items are {key,label} with NO file_id property, so curView.file_id and thumbnail v.file_id were undefined → PrivateImage rendered its blank !fileId state and never fetched the render (confirmed: backend logs show left/right/rear view files were never requested; index still showed 4/4 because it used .label/.length). Verified all 4 view files exist in DB as valid 760KB-990KB PNGs and return 200. FIX: availViews now maps each kept view to {...v, file_id: session.views[v.key].file_id} so the carousel main image + 4 thumbnails receive real file_ids. File: /app/frontend/src/pages/TryOnPage.jsx lines ~157-163. Please retest: run a full try-on (admin@gmail.com/adminpass, engine=fashn) and verify the main carousel image AND all 4 thumbnails render actual images (img with blob src, naturalWidth>0), and navigating prev/next through all 4 views shows a render each time."
+        - working: true
+          agent: "testing"
+          comment: "BUG FIX VERIFIED (2026-09-27). ALL CHECKS PASSED ✅. Tested full try-on flow at https://preview-import.preview.emergentagent.com with admin@gmail.com/adminpass. RESULTS: 1) Login successful, navigated to /try-on. 2) Selected gender (Men), uploaded 4 photos (front/left/right/rear). 3) Selected 1 product (Classic White Oxford Shirt). 4) Try-on completed in 75 seconds with FASHN engine (status COMPLETED). 5) CRITICAL VERIFICATION - Step 4 Results: Main carousel image renders correctly with blob: src, naturalWidth=848, naturalHeight=1264 (NOT blank/grey). All 4 view thumbnails render correctly (front/left/right/rear) - all 848×1264. Clicked through all 4 views using carousel next button - each view shows rendered image. 6) Network verification: 4 distinct file IDs, 13 successful GET /api/files/ requests (200 image/png, 1.3MB-1.5MB each - confirmed real FASHN renders). Screenshot shows real AI-rendered image of person wearing maroon shirt with all 4 thumbnails visible. ROOT CAUSE FIX VERIFIED: availViews now correctly maps file_id from session.views[v.key].file_id (lines 157-163), so PrivateImage components receive real file_ids instead of undefined. Bug fix WORKING CORRECTLY."
   - task: "AdminProducts exact URL editor"
     implemented: true
     working: "NA"
@@ -422,3 +431,5 @@ agent_communication:
       message: "AUTH ENDPOINTS TESTING COMPLETED (2026-09-27). ALL 11 TESTS PASSED ✅ (100% success rate). Verified all 5 requested scenarios: 1) Admin login (admin@gmail.com/adminpass) returns 200 + httpOnly cookies (access_token, refresh_token) + correct user object (email, role=admin). 2) Login with wrong password returns 401. 3) Register new user returns 200 + httpOnly cookies + user object (role=user). 4) GET /auth/me with cookie returns 200 + correct user data. 5) GET /auth/me without cookie returns 401. 6) Logout returns 200 and clears cookies (verified by subsequent /auth/me returning 401). Login now works end-to-end. Root cause fix (missing .env files) VERIFIED. No issues found. Auth API endpoints fully operational."
     - agent: "testing"
       message: "LOGIN FIX VERIFICATION COMPLETED ON PREVIEW-IMPORT DOMAIN (2026-09-27). ALL 4 TEST SCENARIOS PASSED ✅. Tested exclusively on https://preview-import.preview.emergentagent.com (the domain that was failing). CRITICAL FINDINGS: 1) NO AxiosError or Network Error detected on login page or during any auth flow. 2) ALL API calls are same-origin (preview-import.preview.emergentagent.com/api/*), ZERO cross-origin calls to 40e5ab34 domain. 3) Admin login: POST /api/auth/login returned 200, redirected to /admin dashboard successfully. 4) Session persistence: GET /api/auth/me returned 200 after reload, user stayed logged in. 5) New user registration: POST /api/auth/register returned 200, user auto-logged in and redirected to /profile. The resolveApiBase() fix in /app/frontend/src/lib/api.js is working perfectly - it detects when window.location.host differs from configured backend host and falls back to relative '/api' URLs, keeping auth cookies first-party. Login now works correctly on ANY Emergent host (preview-import, 40e5ab34, or any other). Bug fix VERIFIED and PRODUCTION-READY."
+    - agent: "testing"
+      message: "STEP 4 RESULTS CAROUSEL BUG FIX VERIFICATION COMPLETED (2026-09-27). ALL CHECKS PASSED ✅. Tested full try-on flow at https://preview-import.preview.emergentagent.com with admin@gmail.com/adminpass. Test flow: 1) Login successful. 2) Selected gender (Men), uploaded 4 photos (front/left/right/rear). 3) Selected 1 product (Classic White Oxford Shirt). 4) Try-on completed in 75 seconds with FASHN engine. 5) CRITICAL VERIFICATION - Step 4 Results: Main carousel image renders correctly (blob: src, 848×1264, NOT blank/grey). All 4 view thumbnails render correctly (front/left/right/rear, all 848×1264). Clicked through all 4 views - each shows rendered image. 6) Network: 4 distinct file IDs, 13 successful GET /api/files/ requests (200 image/png, 1.3MB-1.5MB each). Screenshot shows real AI-rendered image with all 4 thumbnails visible. ROOT CAUSE FIX VERIFIED: availViews now correctly maps file_id from session.views[v.key].file_id (TryOnPage.jsx lines 157-163), so PrivateImage receives real file_ids instead of undefined. Bug fix WORKING CORRECTLY. Ready for production."

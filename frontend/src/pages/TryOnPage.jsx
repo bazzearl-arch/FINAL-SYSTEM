@@ -154,9 +154,12 @@ export default function TryOnPage() {
   const retryGenerate = () => { retryFromContext(); };
   const restart = () => { resetFromContext(); };
 
-  // available views (with a rendered file)
+  // available views (with a rendered file). Carry the file_id onto each item so
+  // the carousel + thumbnails can actually fetch/display the render.
   const availViews = session?.views
-    ? VIEWS.filter((v) => session.views[v.key]?.file_id)
+    ? VIEWS
+        .filter((v) => session.views[v.key]?.file_id)
+        .map((v) => ({ ...v, file_id: session.views[v.key].file_id }))
     : [];
   const curView = availViews[carousel] || availViews[0];
 

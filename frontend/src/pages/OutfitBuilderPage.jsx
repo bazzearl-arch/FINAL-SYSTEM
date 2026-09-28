@@ -5,7 +5,17 @@ import { Input } from "@/components/ui/input";
 import { Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 
-const SLOTS = ["top", "bottom", "dress", "jacket", "shoes", "jewelry", "accessory"];
+// Outfit slots map to canonical product categories used by the catalog/backend.
+const SLOTS = [
+  { key: "top", label: "Top", cat: "tops" },
+  { key: "bottom", label: "Bottom", cat: "bottoms" },
+  { key: "dress", label: "Dress", cat: "one-pieces" },
+  { key: "jacket", label: "Jacket", cat: "outerwear" },
+  { key: "shoes", label: "Shoes", cat: "shoes" },
+  { key: "jewelry", label: "Jewelry", cat: "jewelry" },
+  { key: "accessory", label: "Accessory", cat: "accessories" },
+];
+const SLOT_BY_KEY = Object.fromEntries(SLOTS.map((s) => [s.key, s]));
 
 export default function OutfitBuilderPage() {
   const [products, setProducts] = useState([]);
@@ -18,7 +28,8 @@ export default function OutfitBuilderPage() {
   }, []);
 
   const total = Object.values(outfit).reduce((s, p) => s + (Number(p?.price) || 0), 0);
-  const filtered = products.filter((p) => p.category === activeSlot);
+  const activeCat = SLOT_BY_KEY[activeSlot]?.cat;
+  const filtered = products.filter((p) => p.category === activeCat);
 
   const pick = (p) => setOutfit((o) => ({ ...o, [activeSlot]: p }));
   const clear = (slot) => setOutfit((o) => { const c = { ...o }; delete c[slot]; return c; });
@@ -59,13 +70,13 @@ export default function OutfitBuilderPage() {
           <p className="overline-label text-muted-foreground">Slots</p>
           <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3" data-testid="outfit-slots">
             {SLOTS.map((s) => {
-              const p = outfit[s];
-              const active = activeSlot === s;
+              const p = outfit[s.key];
+              const active = activeSlot === s.key;
               return (
                 <button
-                  key={s}
-                  data-testid={`slot-${s}`}
-                  onClick={() => setActiveSlot(s)}
+                  key={s.key}
+                  data-testid={`slot-${s.key}`}
+                  onClick={() => setActiveSlot(s.key)}
                   className={`relative aspect-[4/5] rounded-xl border-2 overflow-hidden transition ${
                     active ? "border-foreground" : "border-border hover:border-foreground/40"
                   }`}
@@ -75,8 +86,8 @@ export default function OutfitBuilderPage() {
                       <img src={p.image_url} alt="" className="w-full h-full object-cover" />
                       <span
                         className="absolute top-1 right-1 w-6 h-6 rounded-full bg-background/85 backdrop-blur flex items-center justify-center"
-                        onClick={(e) => { e.stopPropagation(); clear(s); }}
-                        data-testid={`clear-slot-${s}`}
+                        onClick={(e) => { e.stopPropagation(); clear(s.key); }}
+                        data-testid={`clear-slot-${s.key}`}
                       >
                         <X size={12} />
                       </span>
@@ -86,7 +97,7 @@ export default function OutfitBuilderPage() {
                     </>
                   ) : (
                     <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground text-xs uppercase tracking-wider">
-                      <span className="font-mono">{s}</span>
+                      <span className="font-mono">{s.label}</span>
                       <span className="mt-1 text-[10px]">Empty</span>
                     </div>
                   )}
@@ -103,7 +114,7 @@ export default function OutfitBuilderPage() {
         {/* Picker */}
         <section className="lg:col-span-7 bg-card border border-border rounded-2xl p-6">
           <p className="overline-label text-muted-foreground">
-            Choose a {activeSlot}
+            Choose a {SLOT_BY_KEY[activeSlot]?.label || activeSlot}
           </p>
           <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[600px] overflow-y-auto pr-1">
             {filtered.length === 0 && (

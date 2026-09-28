@@ -105,6 +105,35 @@
 user_problem_statement: "AI Try-on PH rescue build. New backend features to test: multi-view outfit try-on (mock engine), gender-specific product/category filtering, admin settings, CSV product import, and single-render test endpoint."
 
 frontend:
+  - task: "Outfit Builder slot to category fix"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/OutfitBuilderPage.jsx"
+    priority: "high"
+    needs_retesting: false
+    stuck_count: 0
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "BUG FIX. Slots used singular keys (top/bottom/dress/jacket/accessory) but product categories are canonical (tops/bottoms/one-pieces/outerwear/accessories), so those slots showed NO items. Added SLOTS objects with cat mapping (top->tops, bottom->bottoms, dress->one-pieces, jacket->outerwear, accessory->accessories; shoes/jewelry unchanged) and filter by mapped category. TEST: on /outfit-builder click each slot and confirm the picker shows items for Top, Bottom, Dress, Jacket (previously empty), plus Shoes/Jewelry/Accessory."
+        - working: true
+          agent: "testing"
+          comment: "OUTFIT BUILDER BUG FIX VERIFIED (2026-01-28). ALL PRIMARY SLOTS NOW SHOW ITEMS ✅. Test results per slot: Top=19 items (category: tops) ✅, Bottom=20 items (category: bottoms) ✅, Dress=10 items (category: one-pieces) ✅, Jacket=1 item (category: outerwear) ✅, Shoes=7 items (category: shoes) ✅, Jewelry=1 item (category: jewelry) ✅, Accessory=0 items (category: accessories) - LEGITIMATE EMPTY (verified via API: 0 products with category='accessories' exist in database, all other categories have products). BUG FIX SUCCESSFUL: Previously empty slots (Top/Bottom/Dress/Jacket) now correctly display products. The slot→category mapping (top→tops, bottom→bottoms, dress→one-pieces, jacket→outerwear) is working correctly. Product: 'Street Smart Plain Pro Club Inspired Tee (white)' tested."
+  - task: "Admin product style tagging + Catalog style filter"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/admin/AdminProducts.jsx"
+    priority: "high"
+    needs_retesting: false
+    stuck_count: 0
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "NEW FEATURE. Admin product editor now has clickable Style chips (Minimalist, Formal, Casual, Streetwear, Modern, Smart Casual, Filipiniana) instead of free-text, saved as an array on the product. Style tags also shown in the products table. Backend already persists style and GET /api/products?style=X filters by array membership; catalog already has style chips. TEST: (1) /admin/products edit a product, toggle 'Formal', Save, reopen to confirm it persisted; (2) /catalog click the 'Formal' style chip and confirm only Formal-tagged products show."
+        - working: true
+          agent: "testing"
+          comment: "ADMIN STYLE TAGGING + CATALOG FILTER VERIFIED (2026-01-28). BOTH FEATURES WORKING ✅. TEST 1 - Admin Product Style Tagging: Navigated to /admin/products, opened edit dialog for product 'Street Smart Plain Pro Club Inspired Tee (white)' (ID: 6ab9286bf04230d80c7e1f56). All 7 style chips present (Minimalist, Formal, Casual, Streetwear, Modern, Smart-Casual, Filipiniana). Toggled 'Formal' chip ON (was inactive), clicked Save, dialog closed. Reopened same product - Formal chip still ACTIVE (persisted correctly). Style tagging working end-to-end. TEST 2 - Catalog Style Filter: Navigated to /catalog (public page). With 'all' filter: 60 products shown. Clicked 'Formal' style chip: 7 products shown (filtered subset, NOT empty state). Filter correctly reduces product count from 60→7, showing only Formal-tagged products. Both features FULLY OPERATIONAL."
+
   - task: "Sign In - Admin User Authentication"
     implemented: true
     working: true
@@ -329,9 +358,7 @@ metadata:
   last_tested: "2026-01-27"
 
 test_plan:
-  current_focus:
-    - "Mandatory 2FA (TOTP) auth flow"
-    - "Auth regression (login/register/google after 2FA)"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -443,6 +470,8 @@ frontend_new:
 
     - agent: "testing"
       message: "COMPREHENSIVE FRONTEND E2E TESTING COMPLETED (2025-01-26). Tested all 5 scenarios requested - ALL PASSED. 1) BRANDING: Page title 'AI Try-on PH', navbar shows 'AI Try-on PH' with ' PH' in gold, no 'AtelierAI' found. 2) TRY-ON WOMEN: Full flow working - gender selection, 4 photos uploaded, 'One Pieces' category shown for women, product selected, try-on completed in ~1s, carousel with 4 views working, View Product URL verified as full URL with path (https://www.lazada.com.ph/products/silk-slip-dress-i3345566778.html). 3) GENDER MEN: Categories correctly exclude 'one-pieces' (shows: tops, bottoms, outerwear, shoes, hats, bags, accessories). 4) ADMIN PRODUCTS: Filter-missing shows 13 products, all 9 canonical categories present in edit dialog, URL validation working ('lazada.com' rejected, 'https://...' accepted). 5) ADMIN IMPORT: Engine settings show 'mock' selected, FASHN 'not set', CSV import successful (2 products). All features working correctly. Ready for production."
+    - agent: "testing"
+      message: "OUTFIT BUILDER BUG FIX + ADMIN STYLE TAGGING + CATALOG FILTER TESTING COMPLETED (2026-01-28). ALL 3 PRIMARY TESTS PASSED ✅. MANDATORY 2FA LOGIN: Successfully completed 2FA setup flow (admin@gmail.com/adminpass). Retrieved TOTP secret (PRGQ3B5QZJ6ISQMCKWMUJT2JV5QUUMG6), generated code (381675), enabled 2FA, redirected to /admin. TEST 1 - OUTFIT BUILDER BUG FIX: All primary slots now show items (Top=19, Bottom=20, Dress=10, Jacket=1, Shoes=7, Jewelry=1). Accessory slot shows 0 items (LEGITIMATE: verified 0 products with category='accessories' exist in database). Previously empty slots (Top/Bottom/Dress/Jacket) now correctly display products. Bug fix SUCCESSFUL. TEST 2 - ADMIN STYLE TAGGING: Edited product 'Street Smart Plain Pro Club Inspired Tee (white)', toggled 'Formal' style ON, saved, reopened - Formal chip still active (persisted correctly). All 7 style chips present. Feature working end-to-end. TEST 3 - CATALOG STYLE FILTER: 'all' filter shows 60 products, 'Formal' filter shows 7 products (filtered subset). Filter correctly reduces product count. Feature working correctly. REGRESSION TEST: User stays logged in across all pages (/admin, /catalog, /outfit-builder, /admin/products). All navigation successful. ALL FEATURES FULLY OPERATIONAL AND READY FOR PRODUCTION."
 
 agent_communication:
     - agent: "testing"

@@ -22,6 +22,9 @@ const CATEGORIES = [
 
 const GENDERS = ["women", "men", "unisex"];
 const PLATFORMS = ["Lazada", "Shopee", "Zalora PH", "Tik Tok Shop", "Bench", "Kultura", "Penshoppe", "Other"];
+// Canonical fashion styles shoppers filter by in the catalog. Keep these EXACT
+// (capitalisation matters) so admin tags match the catalog style chips.
+const STYLE_OPTIONS = ["Minimalist", "Formal", "Casual", "Streetwear", "Modern", "Smart Casual", "Filipiniana"];
 
 const EMPTY = {
   name: "",
@@ -184,7 +187,16 @@ export default function AdminProducts() {
                     <p className="text-xs text-muted-foreground">{p.brand || "—"}</p>
                   </td>
                   <td className="px-4 py-2 capitalize text-xs">{p.gender || "unisex"}</td>
-                  <td className="px-4 py-2 capitalize text-xs">{p.category}</td>
+                  <td className="px-4 py-2 text-xs">
+                    <span className="capitalize">{p.category}</span>
+                    {Array.isArray(p.style) && p.style.length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {p.style.map((s) => (
+                          <span key={s} className="px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground text-[10px]">{s}</span>
+                        ))}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-2 text-xs">{p.source_platform || "—"}</td>
                   <td className="px-4 py-2">
                     {status === "ok" ? (
@@ -260,8 +272,26 @@ export default function AdminProducts() {
             <Field label="Color">
               <Input value={form.color || ""} onChange={(e)=>setForm({...form, color: e.target.value})} />
             </Field>
-            <Field label="Styles (comma sep)">
-              <Input value={Array.isArray(form.style) ? form.style.join(", ") : form.style} onChange={(e)=>setForm({...form, style: e.target.value})} />
+            <Field label="Styles" className="sm:col-span-2" hint="Tag the fashion styles this item belongs to — shoppers filter the catalog by these (e.g. clicking 'Formal' shows every item tagged Formal).">
+              <div className="flex flex-wrap gap-2" data-testid="admin-form-styles">
+                {STYLE_OPTIONS.map((s) => {
+                  const on = Array.isArray(form.style) && form.style.includes(s);
+                  return (
+                    <button
+                      type="button"
+                      key={s}
+                      data-testid={`admin-style-${s.replace(/\s+/g, "-")}`}
+                      onClick={() => setForm((f) => {
+                        const cur = Array.isArray(f.style) ? f.style : [];
+                        return { ...f, style: cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s] };
+                      })}
+                      className={`px-3 py-1.5 rounded-full border text-xs transition ${on ? "bg-foreground text-background border-foreground" : "bg-background text-muted-foreground border-border hover:text-foreground"}`}
+                    >
+                      {s}
+                    </button>
+                  );
+                })}
+              </div>
             </Field>
 
             <Field label="Image URL" required className="sm:col-span-2">
